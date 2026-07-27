@@ -69,6 +69,17 @@ app.use((req, res) => {
   res.status(404).json({ success: false, message: `Route ${req.method} ${req.originalUrl} not found` });
 });
 
+// Global Error Handler Middleware (Catches errors passed by express-async-handler)
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const statusCode = res.statusCode && res.statusCode !== 200 ? res.statusCode : 500;
+  logger.error(`[Error] ${req.method} ${req.originalUrl} - ${err.message}`);
+  res.status(statusCode).json({
+    success: false,
+    message: err.message || "Internal Server Error",
+    stack: process.env.NODE_ENV === "production" ? undefined : err.stack,
+  });
+});
+
 // Socket.io Real-time Notifications
 io.on("connection", (socket) => {
   console.log("Client connected to Socket.io:", socket.id);

@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import asyncHandler from "express-async-handler";
 
 const CATEGORIES = [
   { id: "1", name: "Programming", slug: "programming", count: 140 },
@@ -11,6 +12,9 @@ const CATEGORIES = [
   { id: "8", name: "Photography", slug: "photography", count: 40 },
 ];
 
-export const getCategories = (req: Request, res: Response) => {
-  return res.json({ success: true, categories: CATEGORIES });
-};
+// @desc    Get all categories
+// @route   GET /api/categories
+// @access  Public
+export const getCategories = asyncHandler(async (req: Request, res: Response) => {
+  res.json({ success: true, categories: CATEGORIES });
+});
