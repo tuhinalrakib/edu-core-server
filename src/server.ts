@@ -4,6 +4,14 @@ import { Server } from "socket.io";
 import cors from "cors";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
+import dns from "dns";
+
+// Fix Node.js DNS SRV resolution issue on Windows for MongoDB Atlas (querySrv ECONNREFUSED)
+try {
+  dns.setServers(["8.8.8.8", "8.8.4.4"]);
+} catch (e) {
+  // fallback if custom DNS set fails
+}
 
 import authRoutes from "./routes/authRoutes";
 import userRoutes from "./routes/userRoutes";
@@ -16,6 +24,7 @@ import teacherRoutes from "./routes/teacherRoutes";
 import adminRoutes from "./routes/adminRoutes";
 import paymentRoutes from "./routes/paymentRoutes";
 import dashboardRoutes from "./routes/dashboardRoutes";
+import { httpLogger, logger } from "./utils/logger";
 
 dotenv.config();
 
@@ -31,6 +40,9 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json());
 
+// Real-time Express HTTP Request/Response Logging
+app.use(httpLogger);
+
 // Complete API Route Mapping
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
@@ -44,8 +56,17 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 
+app.get("/", (req, res) => {
+  res.json({ success: true, message: "Welcome to EduCore LMS Backend API! 🚀", version: "1.0.0", healthCheck: "/health" });
+});
+
 app.get("/health", (req, res) => {
   res.json({ status: "OK", timestamp: new Date(), app: "EduCore LMS Backend API" });
+});
+
+// 404 Fallback Handler for Unmatched Routes
+app.use((req, res) => {
+  res.status(404).json({ success: false, message: `Route ${req.method} ${req.originalUrl} not found` });
 });
 
 // Socket.io Real-time Notifications
@@ -70,14 +91,14 @@ const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/educor
 mongoose
   .connect(MONGODB_URI)
   .then(() => {
-    console.log("Connected to MongoDB database successfully.");
+    logger.info("Connected to MongoDB database successfully.");
     server.listen(PORT, () => {
-      console.log(`EduCore Server running on port ${PORT}`);
+      logger.info(`EduCore Server running on port ${PORT} (http://localhost:${PORT})`);
     });
   })
   .catch((err) => {
-    console.warn("MongoDB connection failed. Starting server in standalone mode:", err.message);
+    logger.warn(`MongoDB connection failed. Starting server in standalone mode: ${err.message}`);
     server.listen(PORT, () => {
-      console.log(`EduCore Server running on port ${PORT} (Standalone mode)`);
+      logger.info(`EduCore Server running on port ${PORT} (Standalone mode: http://localhost:${PORT})`);
     });
   });

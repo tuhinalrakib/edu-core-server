@@ -22,7 +22,8 @@
     "pdfkit": "^0.15.0",
     "qrcode": "^1.5.3",
     "socket.io": "^4.7.4",
-    "stripe": "^14.20.0"
+    "stripe": "^14.20.0",
+    "winston": "^3.19.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
