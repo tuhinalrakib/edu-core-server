@@ -3,6 +3,9 @@ import http from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import dotenv from "dotenv";
+
+dotenv.config();
+
 import mongoose from "mongoose";
 import dns from "dns";
 
@@ -24,9 +27,9 @@ import teacherRoutes from "./routes/teacherRoutes";
 import adminRoutes from "./routes/adminRoutes";
 import paymentRoutes from "./routes/paymentRoutes";
 import dashboardRoutes from "./routes/dashboardRoutes";
+import uploadRoutes from "./routes/uploadRoutes";
 import { httpLogger, logger } from "./utils/logger";
-
-dotenv.config();
+import "./utils/redis";
 
 const app = express();
 const server = http.createServer(app);
@@ -55,6 +58,7 @@ app.use("/api/teacher", teacherRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/upload", uploadRoutes);
 
 app.get("/", (req, res) => {
   res.json({ success: true, message: "Welcome to EduCore LMS Backend API! 🚀", version: "1.0.0", healthCheck: "/health" });

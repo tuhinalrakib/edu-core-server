@@ -40,21 +40,63 @@ const UserSchema = new Schema<IUser>(
       lowercase: true,
       trim: true
     },
-    passwordHash: { type: String, required: true },
-    role: { type: String, enum: ["admin", "teacher", "student"], default: "student" },
-    avatar: { type: String, default: "" },
-    bio: { type: String, default: "" },
-    title: { type: String, default: "" },
-    phone: { type: String, default: "" },
-    isEmailVerified: { type: Boolean, default: true },
-    teacherStatus: { type: String, enum: ["pending", "approved", "rejected", "suspended"], default: "approved" },
-    studentStatus: { type: String, enum: ["active", "suspended"], default: "active" },
-    earnings: { type: Number, default: 0 },
-    withdrawBalance: { type: Number, default: 0 },
+    passwordHash: {
+      type: String,
+      required: true
+    },
+    role: {
+      type: String,
+      enum: ["admin", "teacher", "student"],
+      default: "student"
+    },
+    avatar: {
+      type: String,
+      default: ""
+    },
+    bio: {
+      type: String,
+      default: ""
+    },
+    title: {
+      type: String,
+      default: ""
+    },
+    phone: {
+      type: String,
+      default: ""
+    },
+    isEmailVerified: {
+      type: Boolean,
+      default: true
+    },
+    teacherStatus: {
+      type: String, 
+      enum: ["pending", "approved", "rejected", "suspended"], 
+      default: "pending"
+    },
+    studentStatus: {
+      type: String, 
+      enum: ["active", "suspended"], 
+      default: "active"
+    },
+    earnings: { 
+      type: Number, 
+      default: 0 
+    },
+    withdrawBalance: { 
+      type: Number, 
+      default: 0 
+    },
     otpCode: { type: String },
     otpExpiresAt: { type: Date },
-    enrolledCourses: [{ type: Schema.Types.ObjectId, ref: "Course" }],
-    wishlist: [{ type: Schema.Types.ObjectId, ref: "Course" }],
+    enrolledCourses: [{ 
+      type: Schema.Types.ObjectId, 
+      ref: "Course" 
+    }],
+    wishlist: [{ 
+      type: Schema.Types.ObjectId, 
+      ref: "Course" 
+    }],
   },
   { timestamps: true }
 );
