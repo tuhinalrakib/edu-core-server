@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import asyncHandler from "express-async-handler";
+import { asyncHandler } from "../utils/asyncHandler";
 import { Quiz, QuizSubmission } from "../models/Quiz";
 
 // @desc    Get quizzes for a course

@@ -18,6 +18,8 @@ export interface IUser extends Document {
   studentStatus?: StudentStatus;
   earnings: number;
   withdrawBalance: number;
+  otpCode?: string;
+  otpExpiresAt?: Date;
   enrolledCourses: mongoose.Types.ObjectId[];
   wishlist: mongoose.Types.ObjectId[];
   createdAt: Date;
@@ -49,6 +51,8 @@ const UserSchema = new Schema<IUser>(
     studentStatus: { type: String, enum: ["active", "suspended"], default: "active" },
     earnings: { type: Number, default: 0 },
     withdrawBalance: { type: Number, default: 0 },
+    otpCode: { type: String },
+    otpExpiresAt: { type: Date },
     enrolledCourses: [{ type: Schema.Types.ObjectId, ref: "Course" }],
     wishlist: [{ type: Schema.Types.ObjectId, ref: "Course" }],
   },

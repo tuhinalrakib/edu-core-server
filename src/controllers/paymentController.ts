@@ -1,5 +1,5 @@
 import { Response } from "express";
-import asyncHandler from "express-async-handler";
+import { asyncHandler } from "../utils/asyncHandler";
 import Stripe from "stripe";
 import { AuthRequest } from "../middleware/auth";
 import { Order } from "../models/Order";

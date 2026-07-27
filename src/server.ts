@@ -6,11 +6,11 @@ import dotenv from "dotenv";
 import mongoose from "mongoose";
 import dns from "dns";
 
-// Fix Node.js DNS SRV resolution issue on Windows for MongoDB Atlas (querySrv ECONNREFUSED)
+// Prefer IPv4 resolution order for Node.js DNS lookups
 try {
-  dns.setServers(["8.8.8.8", "8.8.4.4"]);
+  dns.setDefaultResultOrder("ipv4first");
 } catch (e) {
-  // fallback if custom DNS set fails
+  // fallback if not supported
 }
 
 import authRoutes from "./routes/authRoutes";
@@ -99,17 +99,28 @@ export { io };
 const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/educore";
 
-mongoose
-  .connect(MONGODB_URI)
-  .then(() => {
+const startServer = async () => {
+  try {
+    await mongoose.connect(MONGODB_URI);
     logger.info("Connected to MongoDB database successfully.");
-    server.listen(PORT, () => {
-      logger.info(`EduCore Server running on port ${PORT} (http://localhost:${PORT})`);
-    });
-  })
-  .catch((err) => {
-    logger.warn(`MongoDB connection failed. Starting server in standalone mode: ${err.message}`);
-    server.listen(PORT, () => {
-      logger.info(`EduCore Server running on port ${PORT} (Standalone mode: http://localhost:${PORT})`);
-    });
+  } catch (err: any) {
+    if (err.message && (err.message.includes("querySrv") || err.message.includes("ECONNREFUSED"))) {
+      logger.warn("Primary DNS SRV lookup failed. Retrying MongoDB Atlas with fallback DNS (8.8.8.8, 1.1.1.1)...");
+      try {
+        dns.setServers(["8.8.8.8", "1.1.1.1"]);
+        await mongoose.connect(MONGODB_URI);
+        logger.info("Connected to MongoDB database successfully via fallback DNS.");
+      } catch (retryErr: any) {
+        logger.warn(`MongoDB connection failed: ${retryErr.message}. Starting server in standalone mode.`);
+      }
+    } else {
+      logger.warn(`MongoDB connection failed. Starting server in standalone mode: ${err.message}`);
+    }
+  }
+
+  server.listen(PORT, () => {
+    logger.info(`EduCore Server running on port ${PORT} (http://localhost:${PORT})`);
   });
+};
+
+startServer();

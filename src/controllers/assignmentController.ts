@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import asyncHandler from "express-async-handler";
+import { asyncHandler } from "../utils/asyncHandler";
 import { Assignment, AssignmentSubmission } from "../models/Assignment";
 
 // @desc    Get assignments for a course

@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import asyncHandler from "express-async-handler";
+import { asyncHandler } from "../utils/asyncHandler";
 
 const CATEGORIES = [
   { id: "1", name: "Programming", slug: "programming", count: 140 },
