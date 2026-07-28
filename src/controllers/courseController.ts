@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { Request, Response } from "express";
 import { asyncHandler } from "../utils/asyncHandler";
 import { Course } from "../models/Course";
@@ -17,7 +18,7 @@ export const getAllCourses = asyncHandler(async (req: Request, res: Response) =>
   }
 
   // 2. Fetch from MongoDB on Cache Miss
-  const filter: any = { status: "approved" };
+  const filter: any = { status: { $in: ["approved", "published", "Approved", "Published"] } };
 
   if (category) filter.category = category;
   if (level) filter.level = level;
@@ -73,28 +74,100 @@ export const getCourseByIdentifier = asyncHandler(async (req: Request, res: Resp
 
 // @desc    Create new course (Invalidates Redis Cache)
 // @route   POST /api/courses
-// @access  Private/Teacher
+// @access  Public / Teacher
 export const createCourse = asyncHandler(async (req: any, res: Response) => {
-  const { title, description, category, price, level } = req.body;
-  if (!title || !description) {
+  const { title } = req.body;
+  if (!title) {
     res.status(400);
-    throw new Error("Title and description are required.");
+    throw new Error("Title is required.");
   }
 
-  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const courseData = { ...req.body };
+
+  // Remove temporary frontend string _id (e.g. "course-1785178064484") if not a 24-char ObjectId
+  if (courseData._id && !mongoose.Types.ObjectId.isValid(courseData._id)) {
+    delete courseData._id;
+  }
+
+  // Remove temporary string _id from sections and lessons as well
+  if (Array.isArray(courseData.sections)) {
+    courseData.sections = courseData.sections.map((sec: any) => {
+      const cleanSec = { ...sec };
+      if (cleanSec._id && !mongoose.Types.ObjectId.isValid(cleanSec._id)) {
+        delete cleanSec._id;
+      }
+      if (Array.isArray(cleanSec.lessons)) {
+        cleanSec.lessons = cleanSec.lessons.map((les: any) => {
+          const cleanLes = { ...les };
+          if (cleanLes._id && !mongoose.Types.ObjectId.isValid(cleanLes._id)) {
+            delete cleanLes._id;
+          }
+          return cleanLes;
+        });
+      }
+      return cleanSec;
+    });
+  }
+
+  const slug = courseData.slug || title.toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + Date.now();
   const course = await Course.create({
-    title,
+    ...courseData,
     slug,
-    description,
-    category: category || "Web Development",
-    price: price || 0,
-    level: level || "Beginner",
-    teacher: req.user.id,
-    status: "pending",
+    teacher: req.user?.id || courseData.teacher || null,
+    status: courseData.status || "pending",
   });
 
   // Invalidate Redis list cache and specific course cache
-  await invalidateCache("courses:list", `courses:id:${course._id}`);
+  try {
+    await invalidateCache("courses:list", `courses:id:${course._id}`);
+  } catch (e) {}
 
   res.status(201).json({ success: true, message: "Course created successfully", course });
+});
+
+// @desc    Update course status (Invalidates Redis Cache)
+// @route   PUT /api/courses/:id/status
+// @access  Admin
+export const updateCourseStatus = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status) {
+    res.status(400);
+    throw new Error("Status is required.");
+  }
+
+  let course;
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    course = await Course.findByIdAndUpdate(id, { status }, { new: true });
+  } else {
+    course = await Course.findOneAndUpdate({ slug: id }, { status }, { new: true });
+  }
+
+  // Invalidate Redis list cache
+  try {
+    await invalidateCache("courses:list", `courses:id:${id}`);
+  } catch (e) {}
+
+  res.json({ success: true, message: `Course status updated to ${status}`, course });
+});
+
+// @desc    Delete course (Invalidates Redis Cache)
+// @route   DELETE /api/courses/:id
+// @access  Admin / Teacher
+export const deleteCourse = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    await Course.findByIdAndDelete(id);
+  } else {
+    await Course.findOneAndDelete({ slug: id });
+  }
+
+  // Invalidate Redis list cache
+  try {
+    await invalidateCache("courses:list", `courses:id:${id}`);
+  } catch (e) {}
+
+  res.json({ success: true, message: "Course deleted successfully." });
 });

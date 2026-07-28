@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from "mongoose";
 
 export type LessonType = "video" | "pdf" | "audio" | "attachment";
-export type VideoProvider = "cloudinary" | "youtube" | "vimeo" | "mp4";
+export type VideoProvider = "cloudinary" | "youtube" | "gdrive" | "googledrive" | "vimeo" | "mp4";
 export type CourseStatus = "draft" | "pending" | "approved" | "rejected" | "archived";
 
 export interface ILesson {
@@ -50,18 +50,28 @@ export interface ICourse extends Document {
   updatedAt: Date;
 }
 
-const LessonSchema = new Schema<ILesson>({
+export type LessonType = "video" | "pdf" | "audio" | "attachment" | "quiz" | "assignment";
+export type VideoProvider = "cloudinary" | "youtube" | "gdrive" | "googledrive" | "vimeo" | "mp4";
+export type CourseStatus = "draft" | "pending" | "approved" | "rejected" | "archived" | "published" | "Published";
+
+const LessonSchema = new Schema<any>({
   title: { type: String, required: true },
-  type: { type: String, enum: ["video", "pdf", "audio", "attachment"], default: "video" },
-  videoProvider: { type: String, enum: ["cloudinary", "youtube", "vimeo", "mp4"], default: "youtube" },
-  contentUrl: { type: String, required: true },
+  type: {
+    type: String,
+    enum: ["video", "pdf", "audio", "attachment", "quiz", "assignment"],
+    default: "video",
+  },
+  videoProvider: { type: String, enum: ["cloudinary", "youtube", "gdrive", "googledrive", "vimeo", "mp4"], default: "youtube" },
+  contentUrl: { type: String, default: "" },
   durationMinutes: { type: Number, default: 10 },
   description: { type: String, default: "" },
   isFreePreview: { type: Boolean, default: false },
-  resources: [{ title: String, fileUrl: String }],
+  resources: [Schema.Types.Mixed],
+  quizParams: { type: Schema.Types.Mixed },
+  assignmentParams: { type: Schema.Types.Mixed },
 });
 
-const SectionSchema = new Schema<ISection>({
+const SectionSchema = new Schema<any>({
   title: { type: String, required: true },
   lessons: [LessonSchema],
 });
@@ -70,18 +80,18 @@ const CourseSchema = new Schema<ICourse>(
   {
     title: { type: String, required: true, trim: true },
     slug: { type: String, required: true, unique: true },
-    description: { type: String, required: true },
+    description: { type: String, default: "" },
     shortDescription: { type: String, default: "" },
-    category: { type: String, required: true },
+    category: { type: String, required: true, default: "Web Development" },
     tags: [{ type: String }],
-    level: { type: String, enum: ["Beginner", "Intermediate", "Advanced", "All Levels"], default: "All Levels" },
+    level: { type: String, default: "All Levels" },
     language: { type: String, default: "English" },
-    price: { type: Number, required: true, default: 0 },
+    price: { type: Number, default: 0 },
     discountPrice: { type: Number },
-    teacher: { type: Schema.Types.ObjectId, ref: "User", required: true },
-    thumbnail: { type: String, required: true },
+    teacher: { type: Schema.Types.ObjectId, ref: "User", required: false },
+    thumbnail: { type: String, default: "" },
     previewVideo: { type: String, default: "" },
-    status: { type: String, enum: ["draft", "pending", "approved", "rejected", "archived"], default: "approved" },
+    status: { type: String, default: "approved" },
     isFeatured: { type: Boolean, default: false },
     sections: [SectionSchema],
     totalLessons: { type: Number, default: 0 },
