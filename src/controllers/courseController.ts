@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { Request, Response } from "express";
 import { asyncHandler } from "../utils/asyncHandler";
 import { Course } from "../models/Course";
+import { User } from "../models/User";
 import { getCache, setCache, invalidateCache } from "../utils/redis";
 
 // @desc    Get all courses with filtering (with Redis Caching)
@@ -17,8 +18,8 @@ export const getAllCourses = asyncHandler(async (req: Request, res: Response) =>
     return res.json(cachedData);
   }
 
-  // 2. Fetch from MongoDB on Cache Miss
-  const filter: any = { status: { $in: ["approved", "published", "Approved", "Published"] } };
+  // 2. Fetch from MongoDB on Cache Miss (Allow all active courses)
+  const filter: any = { status: { $nin: ["archived", "Archived"] } };
 
   if (category) filter.category = category;
   if (level) filter.level = level;
@@ -109,12 +110,34 @@ export const createCourse = asyncHandler(async (req: any, res: Response) => {
     });
   }
 
+  let finalTeacher = req.user?.id || req.user?._id || courseData.teacher;
+
+  // If teacher is an object or string, attempt to link with existing MongoDB User by email if valid ObjectId is missing
+  if (typeof finalTeacher === "object" && finalTeacher !== null) {
+    if (finalTeacher._id && mongoose.Types.ObjectId.isValid(finalTeacher._id)) {
+      finalTeacher = finalTeacher._id;
+    } else if (finalTeacher.id && mongoose.Types.ObjectId.isValid(finalTeacher.id)) {
+      finalTeacher = finalTeacher.id;
+    } else if (finalTeacher.email || courseData.teacherEmail) {
+      const emailToLookup = finalTeacher.email || courseData.teacherEmail;
+      const foundUser = await User.findOne({ email: emailToLookup });
+      if (foundUser) {
+        finalTeacher = foundUser._id;
+      }
+    }
+  } else if (typeof finalTeacher === "string" && !mongoose.Types.ObjectId.isValid(finalTeacher)) {
+    const foundUser = await User.findOne({ email: finalTeacher });
+    if (foundUser) {
+      finalTeacher = foundUser._id;
+    }
+  }
+
   const slug = courseData.slug || title.toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + Date.now();
   const course = await Course.create({
     ...courseData,
     slug,
-    teacher: req.user?.id || courseData.teacher || null,
-    status: courseData.status || "pending",
+    teacher: finalTeacher || courseData.teacher || null,
+    status: courseData.status || "approved",
   });
 
   // Invalidate Redis list cache and specific course cache
@@ -170,4 +193,30 @@ export const deleteCourse = asyncHandler(async (req: Request, res: Response) => 
   } catch (e) {}
 
   res.json({ success: true, message: "Course deleted successfully." });
+});
+
+// @desc    Update existing course details
+// @route   PUT /api/courses/:id
+// @access  Teacher / Admin
+export const updateCourse = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const updateData = { ...req.body };
+
+  let course;
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    course = await Course.findByIdAndUpdate(id, updateData, { new: true });
+  } else {
+    course = await Course.findOneAndUpdate({ slug: id }, updateData, { new: true });
+  }
+
+  if (!course) {
+    res.status(404);
+    throw new Error("Course not found.");
+  }
+
+  try {
+    await invalidateCache("courses:list", `courses:id:${id}`, `courses:id:${course.slug}`);
+  } catch (e) {}
+
+  res.json({ success: true, message: "Course updated successfully.", course });
 });

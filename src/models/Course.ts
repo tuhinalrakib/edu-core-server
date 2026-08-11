@@ -33,7 +33,7 @@ export interface ICourse extends Document {
   language: string;
   price: number;
   discountPrice?: number;
-  teacher: mongoose.Types.ObjectId;
+  teacher: any;
   thumbnail: string;
   previewVideo?: string;
   status: CourseStatus;
@@ -88,7 +88,7 @@ const CourseSchema = new Schema<ICourse>(
     language: { type: String, default: "English" },
     price: { type: Number, default: 0 },
     discountPrice: { type: Number },
-    teacher: { type: Schema.Types.ObjectId, ref: "User", required: false },
+    teacher: { type: Schema.Types.Mixed, ref: "User", required: false },
     thumbnail: { type: String, default: "" },
     previewVideo: { type: String, default: "" },
     status: { type: String, default: "approved" },

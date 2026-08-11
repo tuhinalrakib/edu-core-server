@@ -4,6 +4,8 @@ import { Server } from "socket.io";
 import cors from "cors";
 import dotenv from "dotenv";
 
+import path from "path";
+
 dotenv.config();
 
 import mongoose from "mongoose";
@@ -42,6 +44,8 @@ const io = new Server(server, {
 
 app.use(cors());
 app.use(express.json());
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+
 
 // Real-time Express HTTP Request/Response Logging
 app.use(httpLogger);
