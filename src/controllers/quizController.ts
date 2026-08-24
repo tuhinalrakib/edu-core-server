@@ -21,6 +21,17 @@ export const submitQuiz = asyncHandler(async (req: any, res: Response) => {
     throw new Error("Quiz not found");
   }
 
+  // Enforce single attempt rule
+  const existingSubmission = await QuizSubmission.findOne({
+    quiz: quizId,
+    student: req.user.id,
+  });
+
+  if (existingSubmission) {
+    res.status(400);
+    throw new Error("You have already completed this quiz. Retakes are strictly disabled.");
+  }
+
   let correctCount = 0;
   quiz.questions.forEach((q) => {
     const studentAns = answers.find((a: any) => a.questionId === q._id?.toString());
@@ -45,4 +56,12 @@ export const submitQuiz = asyncHandler(async (req: any, res: Response) => {
   });
 
   res.json({ success: true, submission });
+});
+
+// @desc    Get logged in student's quiz submissions
+// @route   GET /api/quizzes/my-submissions
+// @access  Private/Student
+export const getMyQuizSubmissions = asyncHandler(async (req: any, res: Response) => {
+  const submissions = await QuizSubmission.find({ student: req.user.id }).populate("quiz course");
+  res.json({ success: true, submissions });
 });

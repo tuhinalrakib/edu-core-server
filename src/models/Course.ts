@@ -10,9 +10,10 @@ export interface ILesson {
   type: LessonType;
   videoProvider?: VideoProvider;
   contentUrl: string;
-  durationMinutes: number;
+  durationMinutes?: number;
   description: string;
   isFreePreview: boolean;
+  unlockAt?: string;
   resources?: { title: string; fileUrl: string }[];
 }
 
@@ -50,31 +51,40 @@ export interface ICourse extends Document {
   updatedAt: Date;
 }
 
-export type LessonType = "video" | "pdf" | "audio" | "attachment" | "quiz" | "assignment";
-export type VideoProvider = "cloudinary" | "youtube" | "gdrive" | "googledrive" | "vimeo" | "mp4";
-export type CourseStatus = "draft" | "pending" | "approved" | "rejected" | "archived" | "published" | "Published";
-
-const LessonSchema = new Schema<any>({
-  title: { type: String, required: true },
-  type: {
-    type: String,
-    enum: ["video", "pdf", "audio", "attachment", "quiz", "assignment"],
-    default: "video",
+const LessonSchema = new Schema<any>(
+  {
+    title: { type: String, required: true },
+    type: {
+      type: String,
+      enum: ["video", "pdf", "audio", "attachment", "quiz", "assignment"],
+      default: "video",
+    },
+    videoProvider: {
+      type: String,
+      enum: ["cloudinary", "youtube", "gdrive", "googledrive", "vimeo", "mp4"],
+      default: "youtube",
+    },
+    contentUrl: { type: String, default: "" },
+    durationMinutes: { type: Number, default: 0 },
+    description: { type: String, default: "" },
+    isFreePreview: { type: Boolean, default: false },
+    unlockAt: { type: String, default: "" },
+    resources: [Schema.Types.Mixed],
+    quiz: { type: Schema.Types.Mixed },
+    quizParams: { type: Schema.Types.Mixed },
+    assignment: { type: Schema.Types.Mixed },
+    assignmentParams: { type: Schema.Types.Mixed },
   },
-  videoProvider: { type: String, enum: ["cloudinary", "youtube", "gdrive", "googledrive", "vimeo", "mp4"], default: "youtube" },
-  contentUrl: { type: String, default: "" },
-  durationMinutes: { type: Number, default: 10 },
-  description: { type: String, default: "" },
-  isFreePreview: { type: Boolean, default: false },
-  resources: [Schema.Types.Mixed],
-  quizParams: { type: Schema.Types.Mixed },
-  assignmentParams: { type: Schema.Types.Mixed },
-});
+  { strict: false, _id: true }
+);
 
-const SectionSchema = new Schema<any>({
-  title: { type: String, required: true },
-  lessons: [LessonSchema],
-});
+const SectionSchema = new Schema<any>(
+  {
+    title: { type: String, required: true },
+    lessons: [LessonSchema],
+  },
+  { strict: false, _id: true }
+);
 
 const CourseSchema = new Schema<ICourse>(
   {
@@ -91,7 +101,7 @@ const CourseSchema = new Schema<ICourse>(
     teacher: { type: Schema.Types.Mixed, ref: "User", required: false },
     thumbnail: { type: String, default: "" },
     previewVideo: { type: String, default: "" },
-    status: { type: String, default: "approved" },
+    status: { type: String, default: "pending" },
     isFeatured: { type: Boolean, default: false },
     sections: [SectionSchema],
     totalLessons: { type: Number, default: 0 },

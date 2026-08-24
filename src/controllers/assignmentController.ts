@@ -15,6 +15,18 @@ export const getAssignmentsByCourse = asyncHandler(async (req: Request, res: Res
 // @access  Private/Student
 export const submitAssignment = asyncHandler(async (req: any, res: Response) => {
   const { assignmentId, courseId, fileUrl, notes } = req.body;
+
+  // Enforce single submission rule
+  const existingSubmission = await AssignmentSubmission.findOne({
+    assignment: assignmentId,
+    student: req.user.id,
+  });
+
+  if (existingSubmission) {
+    res.status(400);
+    throw new Error("You have already submitted this assignment. Multiple submissions are strictly disabled.");
+  }
+
   const submission = await AssignmentSubmission.create({
     assignment: assignmentId,
     course: courseId,
@@ -42,4 +54,12 @@ export const gradeAssignment = asyncHandler(async (req: Request, res: Response) 
   }
 
   res.json({ success: true, submission });
+});
+
+// @desc    Get logged in student's assignment submissions
+// @route   GET /api/assignments/my-submissions
+// @access  Private/Student
+export const getMyAssignmentSubmissions = asyncHandler(async (req: any, res: Response) => {
+  const submissions = await AssignmentSubmission.find({ student: req.user.id }).populate("assignment course");
+  res.json({ success: true, submissions });
 });

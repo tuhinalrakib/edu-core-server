@@ -11,7 +11,11 @@ export const getAllUsers = asyncHandler(async (req: Request, res: Response) => {
   const filter: any = {};
   if (role) filter.role = role;
 
-  const users = await User.find(filter).select("-passwordHash").sort({ createdAt: -1 });
+  const users = await User.find(filter)
+    .select("-passwordHash")
+    .populate("enrolledCourses", "title price thumbnail")
+    .sort({ createdAt: -1 });
+
   res.json({ success: true, count: users.length, users });
 });
 
@@ -31,7 +35,7 @@ export const getUserProfile = asyncHandler(async (req: any, res: Response) => {
 // @route   PUT /api/users/profile
 // @access  Private
 export const updateUserProfile = asyncHandler(async (req: any, res: Response) => {
-  const { name, avatar, title, bio } = req.body;
+  const { name, avatar, title, bio, phone, password } = req.body;
 
   let user = null;
   if (req.user?.id) {
@@ -40,9 +44,14 @@ export const updateUserProfile = asyncHandler(async (req: any, res: Response) =>
 
   if (user) {
     if (name) user.name = name;
-    if (avatar) user.avatar = avatar;
-    if (title) (user as any).title = title;
-    if (bio) (user as any).bio = bio;
+    if (avatar !== undefined) user.avatar = avatar;
+    if (title !== undefined) (user as any).title = title;
+    if (bio !== undefined) (user as any).bio = bio;
+    if (phone !== undefined) (user as any).phone = phone;
+    if (password && password.trim().length >= 6) {
+      const salt = await bcrypt.genSalt(10);
+      user.passwordHash = await bcrypt.hash(password, salt);
+    }
     await user.save();
   }
 
@@ -50,11 +59,15 @@ export const updateUserProfile = asyncHandler(async (req: any, res: Response) =>
     success: true,
     message: "Profile updated successfully!",
     user: {
-      id: user ? user._id : req.user?.id || "u-admin",
-      name: name || user?.name || "Admin",
-      email: user?.email || req.user?.email || "admin@educore.com",
-      role: user?.role || req.user?.role || "admin",
-      avatar: avatar || user?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
+      id: user ? user._id : req.user?.id,
+      _id: user ? user._id : req.user?.id,
+      name: user?.name || name || "Teacher",
+      email: user?.email || req.user?.email || "",
+      role: user?.role || req.user?.role || "teacher",
+      avatar: user?.avatar || avatar || "",
+      title: user?.title || title || "",
+      bio: user?.bio || bio || "",
+      phone: user?.phone || phone || "",
     },
   });
 });

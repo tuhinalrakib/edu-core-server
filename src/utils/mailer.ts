@@ -22,9 +22,9 @@ export const sendEmail = async (to: string, subject: string, html: string) => {
         }),
       });
 
-      const data = await response.json();
+      const data: any = await response.json();
       if (response.ok) {
-        console.log("Brevo API Email sent successfully to:", to, "MessageId:", data.messageId || data);
+        console.log("Brevo API Email sent successfully to:", to, "MessageId:", data?.messageId || data);
         return true;
       } else {
         console.warn("Brevo API Email error response:", data);

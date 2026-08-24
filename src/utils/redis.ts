@@ -147,10 +147,26 @@ class RedisClient {
   }
 
   async delByPrefix(prefix: string): Promise<boolean> {
-    for (const k of inMemoryCache.keys()) {
+    for (const k of Array.from(inMemoryCache.keys())) {
       if (k.startsWith(prefix)) {
         inMemoryCache.delete(k);
       }
+    }
+    if (this.isConnected) {
+      try {
+        const cmd = `*2\r\n$4\r\nKEYS\r\n$${prefix.length + 1}\r\n${prefix}*\r\n`;
+        const res = await this.execute(cmd);
+        if (res && res.startsWith("*")) {
+          const lines = res.split("\r\n");
+          for (let i = 1; i < lines.length; i++) {
+            if (lines[i].startsWith("$") && lines[i + 1]) {
+              const k = lines[i + 1];
+              await this.del(k);
+              i++;
+            }
+          }
+        }
+      } catch (err) {}
     }
     return true;
   }
@@ -195,8 +211,9 @@ export const invalidateCache = async (...keysOrPrefixes: string[]): Promise<void
   try {
     for (const kp of keysOrPrefixes) {
       await redis.del(kp);
+      await redis.delByPrefix(kp);
       const prefix = kp.split(":")[0];
-      if (prefix) {
+      if (prefix && prefix !== kp) {
         await redis.delByPrefix(prefix);
       }
       console.log(`🗑️ [Redis CACHE INVALIDATED] Key/Prefix: ${kp}`);
