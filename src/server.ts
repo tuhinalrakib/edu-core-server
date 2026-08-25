@@ -36,12 +36,13 @@ import "./utils/redis";
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
-  },
-});
+
+let io: any = {
+  on: () => {},
+  to: () => ({ emit: () => {} }),
+  in: () => ({ emit: () => {} }),
+  emit: () => {},
+};
 
 app.use(cors());
 app.use(express.json());
@@ -166,22 +167,31 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   });
 });
 
-// Socket.io Real-time Notifications & WebRTC Live Streaming
-io.on("connection", (socket) => {
-  console.log("Client connected to Socket.io:", socket.id);
-
-  socket.on("join", (userId) => {
-    socket.join(userId);
-    console.log(`User ${userId} joined room`);
+// Socket.io Real-time Notifications & WebRTC Live Streaming (Only in Standalone Server mode)
+if (!process.env.VERCEL) {
+  const socketIo = new Server(server, {
+    cors: {
+      origin: "*",
+      methods: ["GET", "POST"],
+    },
   });
 
-  socket.on("disconnect", () => {
-    console.log("Client disconnected:", socket.id);
-  });
-});
+  socketIo.on("connection", (socket) => {
+    console.log("Client connected to Socket.io:", socket.id);
 
-// Register WebRTC signaling handlers
-registerLiveSignalingHandlers(io);
+    socket.on("join", (userId) => {
+      socket.join(userId);
+      console.log(`User ${userId} joined room`);
+    });
+
+    socket.on("disconnect", () => {
+      console.log("Client disconnected:", socket.id);
+    });
+  });
+
+  registerLiveSignalingHandlers(socketIo);
+  io = socketIo;
+}
 
 export { io };
 
