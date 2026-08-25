@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import { asyncHandler } from "../utils/asyncHandler";
 import { Course } from "../models/Course";
 import { User } from "../models/User";
+import { Progress } from "../models/Progress";
 import { getCache, setCache, invalidateCache } from "../utils/redis";
 
 /**
@@ -122,31 +123,48 @@ async function resolveTeacherId(teacherInput: any, teacherEmail?: string): Promi
 }
 
 /**
- * Helper to ensure course object has populated teacher details instead of raw ID
+ * Helper to ensure course object has populated teacher details and live enrolled students count
  */
 async function enrichCourseWithTeacher(course: any) {
   if (!course) return course;
   let c = course.toObject ? course.toObject() : { ...course };
 
+  // 1. Calculate live enrolled students count from User.enrolledCourses & Progress collections
+  try {
+    const courseId = c._id;
+    if (courseId && mongoose.Types.ObjectId.isValid(courseId)) {
+      const [userEnrolledCount, progressEnrolled] = await Promise.all([
+        User.countDocuments({ enrolledCourses: courseId }),
+        Progress.distinct("student", { course: courseId }),
+      ]);
+      const progressCount = Array.isArray(progressEnrolled) ? progressEnrolled.length : 0;
+      const liveEnrolledCount = Math.max(c.totalStudents || 0, userEnrolledCount, progressCount);
+      c.totalStudents = liveEnrolledCount;
+
+      // Sync count back to Course collection in background
+      Course.updateOne({ _id: courseId }, { $set: { totalStudents: liveEnrolledCount } }).exec().catch(() => {});
+    }
+  } catch (metricsErr) {}
+
   let teacherUser: any = null;
 
-  // 1. Try finding teacher by rawTeacherId if valid ObjectId
+  // 2. Try finding teacher by rawTeacherId if valid ObjectId
   let rawTeacherId = c.teacher?._id || (typeof c.teacher === "string" && mongoose.Types.ObjectId.isValid(c.teacher) ? c.teacher : null);
   if (rawTeacherId) {
     teacherUser = await User.findById(rawTeacherId).select("name avatar bio title email").lean();
   }
 
-  // 2. Try by email if teacher not found
+  // 3. Try by email if teacher not found
   if (!teacherUser && (c.teacherEmail || c.teacher?.email)) {
     teacherUser = await User.findOne({ email: c.teacherEmail || c.teacher?.email }).select("name avatar bio title email").lean();
   }
 
-  // 3. Try finding any teacher user in DB
+  // 4. Try finding any teacher user in DB
   if (!teacherUser) {
     teacherUser = await User.findOne({ role: "teacher" }).select("name avatar bio title email").lean();
   }
 
-  // 4. Try admin
+  // 5. Try admin
   if (!teacherUser) {
     teacherUser = await User.findOne({ role: "admin" }).select("name avatar bio title email").lean();
   }
@@ -167,6 +185,7 @@ async function enrichCourseWithTeacher(course: any) {
 
   return c;
 }
+
 
 // @desc    Get all courses with filtering (with Redis Caching)
 // @route   GET /api/courses

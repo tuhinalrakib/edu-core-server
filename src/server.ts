@@ -30,6 +30,7 @@ import adminRoutes from "./routes/adminRoutes";
 import paymentRoutes from "./routes/paymentRoutes";
 import dashboardRoutes from "./routes/dashboardRoutes";
 import uploadRoutes from "./routes/uploadRoutes";
+import liveClassRoutes from "./routes/liveClassRoutes";
 import { httpLogger, logger } from "./utils/logger";
 import "./utils/redis";
 
@@ -63,6 +64,8 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/upload", uploadRoutes);
+app.use("/api/live-classes", liveClassRoutes);
+
 
 app.get("/", (req, res) => {
   res.json({ success: true, message: "Welcome to EduCore LMS Backend API! 🚀", version: "1.0.0", healthCheck: "/health" });
@@ -88,7 +91,9 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   });
 });
 
-// Socket.io Real-time Notifications
+import { registerLiveSignalingHandlers } from "./sockets/liveSignaling";
+
+// Socket.io Real-time Notifications & WebRTC Live Streaming
 io.on("connection", (socket) => {
   console.log("Client connected to Socket.io:", socket.id);
 
@@ -101,6 +106,9 @@ io.on("connection", (socket) => {
     console.log("Client disconnected:", socket.id);
   });
 });
+
+// Register WebRTC signaling handlers
+registerLiveSignalingHandlers(io);
 
 export { io };
 
@@ -132,3 +140,5 @@ const startServer = async () => {
 };
 
 startServer();
+
+export default app;

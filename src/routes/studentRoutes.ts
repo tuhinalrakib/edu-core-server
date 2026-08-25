@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  enrollInCourse,
   getEnrolledCoursesProgress,
   getCourseProgress,
   updateLessonProgress,
@@ -10,9 +11,11 @@ const router = Router();
 
 router.use(authenticateJWT);
 
+router.post("/enroll", enrollInCourse);
 router.get("/courses", getEnrolledCoursesProgress);
 router.get("/progress/:courseId", getCourseProgress);
 router.post("/progress", updateLessonProgress);
 
 export default router;
+
 
