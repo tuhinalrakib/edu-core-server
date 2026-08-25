@@ -51,51 +51,6 @@ if (!process.env.VERCEL) {
 }
 
 
-// Real-time Express HTTP Request/Response Logging
-app.use(httpLogger);
-
-// Complete API Route Mapping
-app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/courses", courseRoutes);
-app.use("/api/categories", categoryRoutes);
-app.use("/api/quizzes", quizRoutes);
-app.use("/api/assignments", assignmentRoutes);
-app.use("/api/student", studentRoutes);
-app.use("/api/teacher", teacherRoutes);
-app.use("/api/admin", adminRoutes);
-app.use("/api/payments", paymentRoutes);
-app.use("/api/dashboard", dashboardRoutes);
-app.use("/api/upload", uploadRoutes);
-app.use("/api/live-classes", liveClassRoutes);
-
-
-app.get("/", (req, res) => {
-  res.json({ success: true, message: "Welcome to EduCore LMS Backend API! 🚀", version: "1.0.0", healthCheck: "/health" });
-});
-
-app.get("/health", (req, res) => {
-  res.json({ status: "OK", timestamp: new Date(), app: "EduCore LMS Backend API" });
-});
-
-// 404 Fallback Handler for Unmatched Routes
-app.use((req, res) => {
-  res.status(404).json({ success: false, message: `Route ${req.method} ${req.originalUrl} not found` });
-});
-
-// Global Error Handler Middleware (Catches errors passed by express-async-handler)
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const statusCode = res.statusCode && res.statusCode !== 200 ? res.statusCode : 500;
-  logger.error(`[Error] ${req.method} ${req.originalUrl} - ${err.message}`);
-  res.status(statusCode).json({
-    success: false,
-    message: err.message || "Internal Server Error",
-    stack: process.env.NODE_ENV === "production" ? undefined : err.stack,
-  });
-});
-
-import { registerLiveSignalingHandlers } from "./sockets/liveSignaling";
-
 // Connect DB Helper with Serverless & Fallback DNS Support
 let isConnected = false;
 export const connectDB = async () => {
@@ -123,10 +78,81 @@ export const connectDB = async () => {
   }
 };
 
-// Middleware to ensure DB connection is active for each serverless invocation
+// Ensure DB connection is active before processing any requests
 app.use(async (req, res, next) => {
   await connectDB();
   next();
+});
+
+// Real-time Express HTTP Request/Response Logging
+app.use(httpLogger);
+
+// Root & Health Check Endpoints
+app.get("/", (req, res) => {
+  res.json({
+    success: true,
+    message: "Welcome to EduCore LMS Backend API! 🚀",
+    version: "1.0.0",
+    api: "/api",
+    healthCheck: "/health",
+  });
+});
+
+app.get("/api", (req, res) => {
+  res.json({
+    success: true,
+    message: "EduCore LMS REST API Root",
+    endpoints: {
+      auth: "/api/auth",
+      courses: "/api/courses",
+      categories: "/api/categories",
+      quizzes: "/api/quizzes",
+      assignments: "/api/assignments",
+      student: "/api/student",
+      teacher: "/api/teacher",
+      admin: "/api/admin",
+      payments: "/api/payments",
+      dashboard: "/api/dashboard",
+      upload: "/api/upload",
+      liveClasses: "/api/live-classes",
+      health: "/health",
+    },
+  });
+});
+
+app.get("/health", (req, res) => {
+  res.json({ status: "OK", timestamp: new Date(), app: "EduCore LMS Backend API" });
+});
+
+// Complete API Route Mapping
+app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/courses", courseRoutes);
+app.use("/api/categories", categoryRoutes);
+app.use("/api/quizzes", quizRoutes);
+app.use("/api/assignments", assignmentRoutes);
+app.use("/api/student", studentRoutes);
+app.use("/api/teacher", teacherRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/payments", paymentRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/upload", uploadRoutes);
+app.use("/api/live-classes", liveClassRoutes);
+
+// 404 Fallback Handler for Unmatched Routes
+app.use((req, res) => {
+  res.status(404).json({ success: false, message: `Route ${req.method} ${req.originalUrl} not found` });
+});
+
+// Global Error Handler Middleware (Catches errors passed by express-async-handler)
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const statusCode = res.statusCode && res.statusCode !== 200 ? res.statusCode : 500;
+  logger.error(`[Error] ${req.method} ${req.originalUrl} - ${err.message}`);
+  res.status(statusCode).json({
+    success: false,
+    message: err.message || "Internal Server Error",
+    stack: process.env.NODE_ENV === "production" ? undefined : err.stack,
+  });
 });
 
 // Socket.io Real-time Notifications & WebRTC Live Streaming
