@@ -93,6 +93,39 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 import { registerLiveSignalingHandlers } from "./sockets/liveSignaling";
 
+// Connect DB Helper with Serverless & Fallback DNS Support
+let isConnected = false;
+export const connectDB = async () => {
+  if (isConnected || mongoose.connection.readyState >= 1) {
+    return;
+  }
+  const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/educore";
+  try {
+    await mongoose.connect(MONGODB_URI);
+    isConnected = true;
+    logger.info("Connected to MongoDB database successfully.");
+  } catch (err: any) {
+    if (err.message && (err.message.includes("querySrv") || err.message.includes("ECONNREFUSED"))) {
+      try {
+        dns.setServers(["8.8.8.8", "1.1.1.1"]);
+        await mongoose.connect(MONGODB_URI);
+        isConnected = true;
+        logger.info("Connected to MongoDB database successfully via fallback DNS.");
+      } catch (retryErr: any) {
+        logger.warn(`MongoDB connection failed: ${retryErr.message}`);
+      }
+    } else {
+      logger.warn(`MongoDB connection failed: ${err.message}`);
+    }
+  }
+};
+
+// Middleware to ensure DB connection is active for each serverless invocation
+app.use(async (req, res, next) => {
+  await connectDB();
+  next();
+});
+
 // Socket.io Real-time Notifications & WebRTC Live Streaming
 io.on("connection", (socket) => {
   console.log("Client connected to Socket.io:", socket.id);
@@ -113,32 +146,14 @@ registerLiveSignalingHandlers(io);
 export { io };
 
 const PORT = process.env.PORT || 5000;
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/educore";
 
-const startServer = async () => {
-  try {
-    await mongoose.connect(MONGODB_URI);
-    logger.info("Connected to MongoDB database successfully.");
-  } catch (err: any) {
-    if (err.message && (err.message.includes("querySrv") || err.message.includes("ECONNREFUSED"))) {
-      logger.warn("Primary DNS SRV lookup failed. Retrying MongoDB Atlas with fallback DNS (8.8.8.8, 1.1.1.1)...");
-      try {
-        dns.setServers(["8.8.8.8", "1.1.1.1"]);
-        await mongoose.connect(MONGODB_URI);
-        logger.info("Connected to MongoDB database successfully via fallback DNS.");
-      } catch (retryErr: any) {
-        logger.warn(`MongoDB connection failed: ${retryErr.message}. Starting server in standalone mode.`);
-      }
-    } else {
-      logger.warn(`MongoDB connection failed. Starting server in standalone mode: ${err.message}`);
-    }
-  }
-
-  server.listen(PORT, () => {
-    logger.info(`EduCore Server running on port ${PORT} (http://localhost:${PORT})`);
+// Only listen to port when running standalone (not on Vercel Serverless)
+if (!process.env.VERCEL) {
+  connectDB().then(() => {
+    server.listen(PORT, () => {
+      logger.info(`EduCore Server running on port ${PORT} (http://localhost:${PORT})`);
+    });
   });
-};
-
-startServer();
+}
 
 export default app;
