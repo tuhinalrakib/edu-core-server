@@ -57,20 +57,27 @@ export const connectDB = async () => {
   if (isConnected || mongoose.connection.readyState >= 1) {
     return;
   }
-  const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/educore";
+  const MONGODB_URI =
+    process.env.MONGODB_URI ||
+    "mongodb+srv://edu_core:ZjgKFszUg5jYPJJh@cluster0.mr0uen8.mongodb.net/edu_core?appName=Cluster0";
+
   try {
-    await mongoose.connect(MONGODB_URI);
+    await mongoose.connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 5000,
+    });
     isConnected = true;
     logger.info("Connected to MongoDB database successfully.");
   } catch (err: any) {
     if (err.message && (err.message.includes("querySrv") || err.message.includes("ECONNREFUSED"))) {
       try {
         dns.setServers(["8.8.8.8", "1.1.1.1"]);
-        await mongoose.connect(MONGODB_URI);
+        await mongoose.connect(MONGODB_URI, {
+          serverSelectionTimeoutMS: 5000,
+        });
         isConnected = true;
         logger.info("Connected to MongoDB database successfully via fallback DNS.");
       } catch (retryErr: any) {
-        logger.warn(`MongoDB connection failed: ${retryErr.message}`);
+        logger.warn(`MongoDB connection fallback failed: ${retryErr.message}`);
       }
     } else {
       logger.warn(`MongoDB connection failed: ${err.message}`);
@@ -78,9 +85,13 @@ export const connectDB = async () => {
   }
 };
 
-// Ensure DB connection is active before processing any requests
+// Ensure DB connection is attempted without blocking request execution
 app.use(async (req, res, next) => {
-  await connectDB();
+  try {
+    await connectDB();
+  } catch (e) {
+    // Non-blocking catch to prevent function invocation crash
+  }
   next();
 });
 
