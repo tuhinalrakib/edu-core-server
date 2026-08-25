@@ -11,6 +11,7 @@ import { authenticateJWT } from "../middleware/auth";
 
 const router = Router();
 
+// Auth routes
 router.post("/register", registerUser);
 router.post("/verify-email", verifyEmail);
 router.post("/login", loginUser);
