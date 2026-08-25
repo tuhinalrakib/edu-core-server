@@ -25,6 +25,10 @@ class RedisClient {
   }
 
   private async connect() {
+    if (process.env.VERCEL) {
+      // In Vercel Serverless environment, use high-speed in-memory cache fallback
+      return;
+    }
     try {
       if (this.mode === "tcp") {
         this.client = net.createConnection({ host: REDIS_HOST, port: REDIS_PORT }, () => {
