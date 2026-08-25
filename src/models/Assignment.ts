@@ -11,10 +11,16 @@ export interface IAssignment extends Document {
 }
 
 export interface IAssignmentSubmission extends Document {
-  assignment: mongoose.Types.ObjectId;
-  course: mongoose.Types.ObjectId;
-  student: mongoose.Types.ObjectId;
+  assignment?: mongoose.Types.ObjectId | string;
+  assignmentTitle?: string;
+  course?: mongoose.Types.ObjectId | string;
+  courseTitle?: string;
+  student?: mongoose.Types.ObjectId | string;
+  studentName?: string;
+  studentEmail?: string;
+  studentAvatar?: string;
   fileUrl: string;
+  fileType?: string;
   notes: string;
   grade?: number;
   feedback?: string;
@@ -37,10 +43,16 @@ const AssignmentSchema = new Schema<IAssignment>(
 
 const AssignmentSubmissionSchema = new Schema<IAssignmentSubmission>(
   {
-    assignment: { type: Schema.Types.ObjectId, ref: "Assignment", required: true },
-    course: { type: Schema.Types.ObjectId, ref: "Course", required: true },
-    student: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    assignment: { type: Schema.Types.Mixed, ref: "Assignment" },
+    assignmentTitle: { type: String, default: "Assignment Project" },
+    course: { type: Schema.Types.Mixed, ref: "Course" },
+    courseTitle: { type: String, default: "Enrolled Course" },
+    student: { type: Schema.Types.Mixed, ref: "User" },
+    studentName: { type: String, default: "Student" },
+    studentEmail: { type: String, default: "" },
+    studentAvatar: { type: String, default: "" },
     fileUrl: { type: String, required: true },
+    fileType: { type: String, default: "ZIP Archive" },
     notes: { type: String, default: "" },
     grade: { type: Number },
     feedback: { type: String, default: "" },

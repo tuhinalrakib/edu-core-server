@@ -31,6 +31,7 @@ import paymentRoutes from "./routes/paymentRoutes";
 import dashboardRoutes from "./routes/dashboardRoutes";
 import uploadRoutes from "./routes/uploadRoutes";
 import liveClassRoutes from "./routes/liveClassRoutes";
+import { registerLiveSignalingHandlers } from "./sockets/liveSignaling";
 import { httpLogger, logger } from "./utils/logger";
 import "./utils/redis";
 
@@ -100,6 +101,8 @@ app.use(async (req, res, next) => {
 app.use(httpLogger);
 
 // Root & Health Check Endpoints
+app.get("/favicon.ico", (req, res) => res.status(204).end());
+
 app.get("/", (req, res) => {
   res.json({
     success: true,
