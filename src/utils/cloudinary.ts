@@ -9,14 +9,21 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET || "VX8OFXnLhD1a5H2y90JSW9Qo61g",
 });
 
-const uploadDir = path.join(process.cwd(), "uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+import os from "os";
+
+const uploadDir = process.env.VERCEL ? os.tmpdir() : path.join(process.cwd(), "uploads");
+try {
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+} catch (e) {
+  // Ignore in read-only serverless filesystem
 }
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, uploadDir);
+    const targetDir = process.env.VERCEL ? os.tmpdir() : uploadDir;
+    cb(null, targetDir);
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);

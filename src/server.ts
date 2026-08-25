@@ -45,7 +45,10 @@ const io = new Server(server, {
 
 app.use(cors());
 app.use(express.json());
-app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+
+if (!process.env.VERCEL) {
+  app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+}
 
 
 // Real-time Express HTTP Request/Response Logging
