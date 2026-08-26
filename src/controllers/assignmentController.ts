@@ -3,52 +3,6 @@ import { asyncHandler } from "../utils/asyncHandler";
 import { Assignment, AssignmentSubmission } from "../models/Assignment";
 import { Course } from "../models/Course";
 
-// Initial seed submissions if database is fresh
-const SEED_SUBMISSIONS = [
-  {
-    assignmentTitle: "Build a Full-Stack E-Commerce API with Express",
-    courseTitle: "Next.js 15 & React 19 Full-Stack SaaS Masterclass",
-    studentName: "Alex Rivera",
-    studentAvatar: "https://ui-avatars.com/api/?name=Alex+Rivera&background=7c3aed&color=fff&bold=true",
-    studentEmail: "alex.rivera@example.com",
-    fileType: "ZIP Archive",
-    fileUrl: "https://github.com/alexrivera/express-ecommerce-api.zip",
-    notes: "Completed all CRUD endpoints, JWT authentication middleware, and Stripe webhook handling.",
-    status: "pending",
-    grade: undefined,
-    feedback: "",
-    submittedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-  },
-  {
-    assignmentTitle: "Figma Mobile App Wireframe & Prototyping",
-    courseTitle: "UI/UX Design Masterclass 2026",
-    studentName: "Jessica Chen",
-    studentAvatar: "https://ui-avatars.com/api/?name=Jessica+Chen&background=2563eb&color=fff&bold=true",
-    studentEmail: "jessica.chen@example.com",
-    fileType: "Figma Link",
-    fileUrl: "https://figma.com/file/sample-wireframe-prototype",
-    notes: "Designed full design system with 24 mobile screen components and micro-interactions.",
-    status: "pending",
-    grade: undefined,
-    feedback: "",
-    submittedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
-  },
-  {
-    assignmentTitle: "Build a Full-Stack E-Commerce API with Express",
-    courseTitle: "Next.js 15 & React 19 Full-Stack SaaS Masterclass",
-    studentName: "Marcus Vance",
-    studentAvatar: "https://ui-avatars.com/api/?name=Marcus+Vance&background=059669&color=fff&bold=true",
-    studentEmail: "marcus.vance@example.com",
-    fileType: "PDF Document",
-    fileUrl: "https://educore.com/docs/marcus-assignment.pdf",
-    notes: "Full architectural report and Postman API collection documentation.",
-    status: "graded",
-    grade: 95,
-    feedback: "Outstanding API architecture and clean TypeScript code structure!",
-    submittedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
-  },
-];
-
 // @desc    Get assignments for a course
 // @route   GET /api/assignments/course/:courseId
 // @access  Private
@@ -61,18 +15,35 @@ export const getAssignmentsByCourse = asyncHandler(async (req: Request, res: Res
 // @route   GET /api/assignments/submissions
 // @access  Private/Teacher/Admin
 export const getTeacherSubmissions = asyncHandler(async (req: any, res: Response) => {
-  let submissions = await AssignmentSubmission.find().sort({ createdAt: -1 });
+  // Clean up any old dummy seed submissions if present
+  try {
+    await AssignmentSubmission.deleteMany({
+      studentName: { $in: ["Alex Rivera", "Jessica Chen", "Marcus Vance"] },
+    });
+  } catch (e) {}
 
-  // Auto seed if empty so the teacher has interactive submissions to grade immediately
-  if (submissions.length === 0) {
-    try {
-      await AssignmentSubmission.insertMany(SEED_SUBMISSIONS);
-      submissions = await AssignmentSubmission.find().sort({ createdAt: -1 });
-    } catch (e) {}
+  let filter: any = {};
+  if (req.user && req.user.role === "teacher") {
+    const teacherCourses = await Course.find({
+      $or: [{ teacher: req.user.id }, { teacher: req.user._id }, { "teacher._id": req.user.id }],
+    }).select("_id title");
+
+    if (teacherCourses.length > 0) {
+      const courseIds = teacherCourses.map((c) => c._id);
+      const courseTitles = teacherCourses.map((c) => c.title);
+      filter = {
+        $or: [
+          { course: { $in: courseIds } },
+          { courseTitle: { $in: courseTitles } },
+        ],
+      };
+    }
   }
 
+  const submissions = await AssignmentSubmission.find(filter).sort({ createdAt: -1 });
   res.json({ success: true, submissions });
 });
+
 
 // @desc    Submit an assignment
 // @route   POST /api/assignments/submit
@@ -173,4 +144,40 @@ export const getMyAssignmentSubmissions = asyncHandler(async (req: any, res: Res
 
   res.json({ success: true, submissions });
 });
+
+// @desc    Delete an assignment submission
+// @route   DELETE /api/assignments/submissions/:id
+// @access  Private/Teacher/Admin
+export const deleteSubmission = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const deleted = await AssignmentSubmission.findByIdAndDelete(id);
+  if (!deleted) {
+    res.status(404);
+    throw new Error("Submission not found");
+  }
+  res.json({ success: true, message: "Submission deleted successfully" });
+});
+
+// @desc    Create a mock/test student submission for testing
+// @route   POST /api/assignments/mock-submission
+// @access  Private/Teacher/Admin
+export const createMockSubmission = asyncHandler(async (req: Request, res: Response) => {
+  const { studentName, courseTitle, assignmentTitle, fileType, fileUrl, notes } = req.body;
+  const name = studentName || "Alex Rivera";
+  const submission = await AssignmentSubmission.create({
+    studentName: name,
+    studentAvatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=7c3aed&color=fff&bold=true`,
+    studentEmail: `${name.toLowerCase().replace(/\s+/g, ".")}@example.com`,
+    courseTitle: courseTitle || "Next.js 15 & React 19 Full-Stack SaaS Masterclass",
+    assignmentTitle: assignmentTitle || "Build a Full-Stack E-Commerce API with Express",
+    fileType: fileType || "ZIP Archive",
+    fileUrl: fileUrl || "https://github.com/alexrivera/express-ecommerce-api.zip",
+    notes: notes || "Submitted implementation covering all requirements.",
+    status: "pending",
+    submittedAt: new Date(),
+  });
+  res.status(201).json({ success: true, submission });
+});
+
+
 
