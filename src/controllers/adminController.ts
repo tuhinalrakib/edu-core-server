@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { Request, Response } from "express";
 import { asyncHandler } from "../utils/asyncHandler";
 import { User } from "../models/User";
@@ -129,19 +130,27 @@ export const getAdminCourses = asyncHandler(async (req: Request, res: Response) 
     return res.json(cachedData);
   }
 
-  const courses = await Course.find().populate("teacher", "name email");
+  const courses = await Course.find().populate("teacher", "name email avatar").sort({ createdAt: -1 });
   const responseData = { success: true, courses };
 
   await setCache(cacheKey, responseData, 1800);
   res.json(responseData);
 });
 
-// @desc    Update course status (published, rejected) -> Invalidates Redis Cache
+// @desc    Update course status (published, rejected, draft) -> Invalidates Redis Cache
 // @route   PATCH /api/admin/courses/:id/status
 // @access  Private/Admin
 export const updateCourseStatus = asyncHandler(async (req: Request, res: Response) => {
   const { status } = req.body;
-  const course = await Course.findById(req.params.id);
+  const id = req.params.id;
+  
+  let course;
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    course = await Course.findById(id);
+  } else {
+    course = await Course.findOne({ slug: id });
+  }
+
   if (!course) {
     res.status(404);
     throw new Error("Course not found.");
@@ -151,7 +160,7 @@ export const updateCourseStatus = asyncHandler(async (req: Request, res: Respons
   await course.save();
 
   // Invalidate Redis caches for admin and public course lists
-  await invalidateCache("admin:courses:all", "admin:stats", "courses:list", `courses:id:${req.params.id}`);
+  await invalidateCache("admin:courses:all", "admin:stats", "courses", "courses:list", `courses:id:${id}`, `courses:id:${course._id}`, `courses:id:${course.slug}`);
 
   res.json({ success: true, message: `Course status updated to ${status}`, course });
 });

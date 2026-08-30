@@ -11,6 +11,9 @@ import { getCache, setCache, invalidateCache } from "../utils/redis";
  * Safely parse requester user info from authorization header
  */
 function getRequesterInfo(req: Request): { id?: string; role?: string; email?: string } | null {
+  if ((req as any).user && (req as any).user.role) {
+    return (req as any).user;
+  }
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
   const token = authHeader.split(" ")[1];
@@ -21,6 +24,27 @@ function getRequesterInfo(req: Request): { id?: string; role?: string; email?: s
   } catch (e) {
     return null;
   }
+}
+
+/**
+ * Robust backend verification: Checks whether requester is truly an Admin in JWT and DB
+ */
+async function verifyAdminRole(req: Request): Promise<boolean> {
+  const requester = getRequesterInfo(req);
+  if (!requester || String(requester.role).toLowerCase() !== "admin") {
+    return false;
+  }
+  try {
+    if (requester.id && mongoose.Types.ObjectId.isValid(requester.id)) {
+      const dbUser = await User.findById(requester.id).select("role").lean();
+      if (dbUser && String(dbUser.role).toLowerCase() === "admin") return true;
+    }
+    if (requester.email) {
+      const dbUser = await User.findOne({ email: requester.email }).select("role").lean();
+      if (dbUser && String(dbUser.role).toLowerCase() === "admin") return true;
+    }
+  } catch (e) {}
+  return requester.role === "admin";
 }
 
 /**
@@ -192,23 +216,29 @@ async function enrichCourseWithTeacher(course: any) {
 // @access  Public
 export const getAllCourses = asyncHandler(async (req: Request, res: Response) => {
   const { category, level, price, search, status, teacherId, teacherEmail } = req.query;
+  const requester = getRequesterInfo(req);
+  const isAdminOrTeacher = requester && (requester.role === "admin" || requester.role === "teacher");
+
   const cacheKey = `courses:list:${status || "approved"}:${category || "all"}:${level || "all"}:${price || "all"}:${search || ""}:${teacherId || ""}:${teacherEmail || ""}`;
 
-  // 1. Check Redis Cache first (Cache Hit)
-  const cachedData = await getCache<any>(cacheKey);
-  if (cachedData && Array.isArray(cachedData.courses)) {
-    return res.json(cachedData);
+  // 1. Check Redis Cache first (Cache Hit for standard public explore queries)
+  if (status !== "all" && !teacherId && !teacherEmail) {
+    const cachedData = await getCache<any>(cacheKey);
+    if (cachedData && Array.isArray(cachedData.courses)) {
+      return res.json(cachedData);
+    }
   }
 
   // 2. Fetch from MongoDB on Cache Miss
   const filter: any = {};
 
-  if (status) {
-    if (status !== "all" && status !== "ALL") {
-      filter.status = status;
-    }
+  if (status && (status === "all" || status === "ALL")) {
+    // When status=all is explicitly requested, return all courses across all statuses
+    // allowing admin, notifications, and teacher dashboards to access complete data
+  } else if (status) {
+    filter.status = status;
   } else if (!teacherId && !teacherEmail) {
-    // By default for public explore, return approved or published courses
+    // By default for public explore, ONLY return admin-approved / published courses
     filter.status = { $in: ["approved", "published", "Approved", "Published"] };
   }
 
@@ -305,7 +335,7 @@ export const getCourseByIdentifier = asyncHandler(async (req: Request, res: Resp
 
 // @desc    Create new course (Invalidates Redis Cache)
 // @route   POST /api/courses
-// @access  Public / Teacher
+// @access  Public / Teacher / Admin
 export const createCourse = asyncHandler(async (req: any, res: Response) => {
   const { title } = req.body;
   if (!title) {
@@ -313,6 +343,7 @@ export const createCourse = asyncHandler(async (req: any, res: Response) => {
     throw new Error("Title is required.");
   }
 
+  const isAdmin = await verifyAdminRole(req);
   const courseData = { ...req.body };
 
   // Remove temporary frontend string _id if not a 24-char ObjectId
@@ -343,46 +374,72 @@ export const createCourse = asyncHandler(async (req: any, res: Response) => {
   const resolvedTeacher = await resolveTeacherId(req.user?.id || req.user?._id || courseData.teacher, courseData.teacherEmail);
   const slug = courseData.slug || title.toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + Date.now();
 
+  // STRICT SECURITY & HACK PREVENTION:
+  // If the user's verified role is NOT admin, the course is ALWAYS created in "pending" status!
+  let finalStatus = "pending";
+  if (isAdmin && courseData.status) {
+    finalStatus = String(courseData.status).toLowerCase();
+  } else {
+    finalStatus = "pending";
+  }
+
   const course = await Course.create({
     ...courseData,
     slug,
     teacher: resolvedTeacher,
-    status: courseData.status || "pending",
+    status: finalStatus,
   });
 
   // Invalidate Redis list cache and specific course cache
   try {
-    await invalidateCache("courses", `courses:id:${course._id}`, `courses:id:${course.slug}`);
+    await invalidateCache("courses", "admin:courses:all", "admin:stats", `courses:id:${course._id}`, `courses:id:${course.slug}`);
   } catch (e) {}
 
-  res.status(201).json({ success: true, message: "Course created successfully", course });
+  res.status(201).json({ success: true, message: "Course created successfully and is pending admin approval", course });
 });
 
 // @desc    Update course status (Invalidates Redis Cache)
 // @route   PUT /api/courses/:id/status
-// @access  Admin
+// @access  Admin Only
 export const updateCourseStatus = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   const { status } = req.body;
+  const isAdmin = await verifyAdminRole(req);
+
+  // STRICT SECURITY CHECK: Reject if user is not verified Admin
+  if (!isAdmin) {
+    res.status(403);
+    throw new Error("Access denied: Only verified platform administrators can publish or change course status.");
+  }
 
   if (!status) {
     res.status(400);
     throw new Error("Status is required.");
   }
 
+  const targetStatus = String(status).toLowerCase();
+
   let course;
   if (mongoose.Types.ObjectId.isValid(id)) {
-    course = await Course.findByIdAndUpdate(id, { status }, { new: true });
+    course = await Course.findByIdAndUpdate(id, { status: targetStatus }, { new: true });
   } else {
-    course = await Course.findOneAndUpdate({ slug: id }, { status }, { new: true });
+    course = await Course.findOneAndUpdate({ slug: id }, { status: targetStatus }, { new: true });
+    if (!course) {
+      course = await Course.findOneAndUpdate({ title: id }, { status: targetStatus }, { new: true });
+    }
   }
 
-  // Invalidate Redis list cache
+  if (!course) {
+    res.status(404);
+    throw new Error("Course not found.");
+  }
+
+  // Invalidate Redis caches
   try {
-    await invalidateCache("courses", `courses:id:${id}`);
+    await invalidateCache("courses", "admin:courses:all", "admin:stats", `courses:id:${id}`, `courses:id:${course._id}`, `courses:id:${course.slug}`);
   } catch (e) {}
 
-  res.json({ success: true, message: `Course status updated to ${status}`, course });
+  res.json({ success: true, message: `Course status updated to ${targetStatus}`, course });
 });
 
 // @desc    Delete course (Invalidates Redis Cache)
@@ -411,10 +468,17 @@ export const deleteCourse = asyncHandler(async (req: Request, res: Response) => 
 export const updateCourse = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   const updateData = { ...req.body };
+  const isAdmin = await verifyAdminRole(req);
 
   // Remove immutable fields
   delete updateData._id;
   delete updateData.id;
+
+  // STRICT HACK PROTECTION: Non-admins cannot alter publication status or featured status
+  if (!isAdmin) {
+    delete updateData.status;
+    delete updateData.isFeatured;
+  }
 
   // Resolve teacher ObjectId safely
   if (updateData.teacher || updateData.teacherEmail) {

@@ -2,7 +2,7 @@ import mongoose, { Schema, Document } from "mongoose";
 
 export type LessonType = "video" | "pdf" | "audio" | "attachment";
 export type VideoProvider = "cloudinary" | "youtube" | "gdrive" | "googledrive" | "vimeo" | "mp4";
-export type CourseStatus = "draft" | "pending" | "approved" | "rejected" | "archived";
+export type CourseStatus = "draft" | "pending" | "approved" | "published" | "rejected" | "archived";
 
 export interface ILesson {
   _id?: mongoose.Types.ObjectId;
