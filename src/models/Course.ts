@@ -47,6 +47,7 @@ export interface ICourse extends Document {
   totalStudents: number;
   requirements: string[];
   learningOutcomes: string[];
+  hasCertificate?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -111,6 +112,7 @@ const CourseSchema = new Schema<ICourse>(
     totalStudents: { type: Number, default: 0 },
     requirements: [{ type: String }],
     learningOutcomes: [{ type: String }],
+    hasCertificate: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

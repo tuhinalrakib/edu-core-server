@@ -20,8 +20,8 @@ export interface IUser extends Document {
   withdrawBalance: number;
   otpCode?: string;
   otpExpiresAt?: Date;
-  enrolledCourses: mongoose.Types.ObjectId[];
-  wishlist: mongoose.Types.ObjectId[];
+  enrolledCourses: any[];
+  wishlist: any[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -67,7 +67,7 @@ const UserSchema = new Schema<IUser>(
     },
     isEmailVerified: {
       type: Boolean,
-      default: true
+      default: false
     },
     teacherStatus: {
       type: String, 
@@ -90,11 +90,11 @@ const UserSchema = new Schema<IUser>(
     otpCode: { type: String },
     otpExpiresAt: { type: Date },
     enrolledCourses: [{ 
-      type: Schema.Types.ObjectId, 
+      type: Schema.Types.Mixed, 
       ref: "Course" 
     }],
     wishlist: [{ 
-      type: Schema.Types.ObjectId, 
+      type: Schema.Types.Mixed, 
       ref: "Course" 
     }],
   },

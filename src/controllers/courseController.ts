@@ -221,11 +221,54 @@ export const getAllCourses = asyncHandler(async (req: Request, res: Response) =>
 
   const cacheKey = `courses:list:${status || "approved"}:${category || "all"}:${level || "all"}:${price || "all"}:${search || ""}:${teacherId || ""}:${teacherEmail || ""}`;
 
+  const attachStudentEnrollment = async (baseCourses: any[]) => {
+    if (!requester?.id || requester.role !== "student") return baseCourses;
+    try {
+      const studentUser = await User.findById(requester.id).select("enrolledCourses").lean();
+      const studentProgress = await Progress.find({ student: requester.id }).select("course").lean();
+      const enrolledSet = new Set<string>();
+
+      if (studentUser && Array.isArray(studentUser.enrolledCourses)) {
+        studentUser.enrolledCourses.forEach((c: any) => {
+          if (typeof c === "object" && c !== null) {
+            if (c._id) enrolledSet.add(c._id.toString());
+            if (c.slug) enrolledSet.add(c.slug);
+          } else if (c) {
+            enrolledSet.add(c.toString());
+          }
+        });
+      }
+
+      if (studentProgress) {
+        studentProgress.forEach((p: any) => {
+          if (p.course) {
+            if (typeof p.course === "object" && p.course !== null) {
+              if (p.course._id) enrolledSet.add(p.course._id.toString());
+              if (p.course.slug) enrolledSet.add(p.course.slug);
+            } else {
+              enrolledSet.add(p.course.toString());
+            }
+          }
+        });
+      }
+
+      return baseCourses.map((c: any) => {
+        const cId = c._id?.toString();
+        const cSlug = c.slug;
+        const isEnrolled = (cId && enrolledSet.has(cId)) || (cSlug && enrolledSet.has(cSlug));
+        return { ...c, isEnrolled: Boolean(isEnrolled) };
+      });
+    } catch (err) {
+      return baseCourses;
+    }
+  };
+
   // 1. Check Redis Cache first (Cache Hit for standard public explore queries)
   if (status !== "all" && !teacherId && !teacherEmail) {
     const cachedData = await getCache<any>(cacheKey);
     if (cachedData && Array.isArray(cachedData.courses)) {
-      return res.json(cachedData);
+      const coursesWithEnrollment = await attachStudentEnrollment(cachedData.courses);
+      return res.json({ ...cachedData, courses: coursesWithEnrollment });
     }
   }
 
@@ -277,7 +320,8 @@ export const getAllCourses = asyncHandler(async (req: Request, res: Response) =>
   // 3. Set Redis Cache with 1-hour expiration
   await setCache(cacheKey, responseData, 3600);
 
-  res.json(responseData);
+  const coursesWithEnrollment = await attachStudentEnrollment(enrichedCourses);
+  res.json({ ...responseData, courses: coursesWithEnrollment });
 });
 
 // @desc    Get single course by slug or ID (with Redis Caching & Drip Protection)
@@ -329,6 +373,25 @@ export const getCourseByIdentifier = asyncHandler(async (req: Request, res: Resp
   );
 
   const safeCourse = sanitizeCourseForDrip(course, isTeacherOrAdmin);
+
+  if (requester?.id) {
+    try {
+      const studentUser = await User.findById(requester.id).select("enrolledCourses").lean();
+      const studentProgress = await Progress.findOne({
+        student: requester.id,
+        course: { $in: [course._id, course.slug, identifier] },
+      }).lean();
+
+      const enrolledInUser = studentUser?.enrolledCourses?.some(
+        (c: any) =>
+          (c && c.toString() === course._id.toString()) ||
+          (c && course.slug && c.toString() === course.slug) ||
+          (c?._id && c._id.toString() === course._id.toString())
+      );
+
+      safeCourse.isEnrolled = Boolean(enrolledInUser || studentProgress);
+    } catch (e) {}
+  }
 
   res.json({ success: true, course: safeCourse });
 });

@@ -8,29 +8,9 @@ import path from "path";
 
 dotenv.config();
 
-import mongoose from "mongoose";
-import dns from "dns";
+import { connectDB } from "./config/db";
 
-// Prefer IPv4 resolution order for Node.js DNS lookups
-try {
-  dns.setDefaultResultOrder("ipv4first");
-} catch (e) {
-  // fallback if not supported
-}
-
-import authRoutes from "./routes/authRoutes";
-import userRoutes from "./routes/userRoutes";
-import courseRoutes from "./routes/courseRoutes";
-import categoryRoutes from "./routes/categoryRoutes";
-import quizRoutes from "./routes/quizRoutes";
-import assignmentRoutes from "./routes/assignmentRoutes";
-import studentRoutes from "./routes/studentRoutes";
-import teacherRoutes from "./routes/teacherRoutes";
-import adminRoutes from "./routes/adminRoutes";
-import paymentRoutes from "./routes/paymentRoutes";
-import dashboardRoutes from "./routes/dashboardRoutes";
-import uploadRoutes from "./routes/uploadRoutes";
-import liveClassRoutes from "./routes/liveClassRoutes";
+import indexRoutes from "./routes/index";
 import { registerLiveSignalingHandlers } from "./sockets/liveSignaling";
 import { httpLogger, logger } from "./utils/logger";
 import "./utils/redis";
@@ -53,39 +33,7 @@ if (!process.env.VERCEL) {
 }
 
 
-// Connect DB Helper with Serverless & Fallback DNS Support
-let isConnected = false;
-export const connectDB = async () => {
-  if (isConnected || mongoose.connection.readyState >= 1) {
-    return;
-  }
-  const MONGODB_URI =
-    process.env.MONGODB_URI ||
-    "mongodb+srv://edu_core:ZjgKFszUg5jYPJJh@cluster0.mr0uen8.mongodb.net/edu_core?appName=Cluster0";
-
-  try {
-    await mongoose.connect(MONGODB_URI, {
-      serverSelectionTimeoutMS: 5000,
-    });
-    isConnected = true;
-    logger.info("Connected to MongoDB database successfully.");
-  } catch (err: any) {
-    if (err.message && (err.message.includes("querySrv") || err.message.includes("ECONNREFUSED"))) {
-      try {
-        dns.setServers(["8.8.8.8", "1.1.1.1"]);
-        await mongoose.connect(MONGODB_URI, {
-          serverSelectionTimeoutMS: 5000,
-        });
-        isConnected = true;
-        logger.info("Connected to MongoDB database successfully via fallback DNS.");
-      } catch (retryErr: any) {
-        logger.warn(`MongoDB connection fallback failed: ${retryErr.message}`);
-      }
-    } else {
-      logger.warn(`MongoDB connection failed: ${err.message}`);
-    }
-  }
-};
+export { connectDB };
 
 // Ensure DB connection is attempted without blocking request execution
 app.use(async (req, res, next) => {
@@ -113,6 +61,7 @@ app.get("/", (req, res) => {
   });
 });
 
+// API Root Endpoint with Available Routes
 app.get("/api", (req, res) => {
   res.json({
     success: true,
@@ -135,24 +84,13 @@ app.get("/api", (req, res) => {
   });
 });
 
+// Health Check Endpoint for Monitoring & Load Balancers
 app.get("/health", (req, res) => {
   res.json({ status: "OK", timestamp: new Date(), app: "EduCore LMS Backend API" });
 });
 
 // Complete API Route Mapping
-app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/courses", courseRoutes);
-app.use("/api/categories", categoryRoutes);
-app.use("/api/quizzes", quizRoutes);
-app.use("/api/assignments", assignmentRoutes);
-app.use("/api/student", studentRoutes);
-app.use("/api/teacher", teacherRoutes);
-app.use("/api/admin", adminRoutes);
-app.use("/api/payments", paymentRoutes);
-app.use("/api/dashboard", dashboardRoutes);
-app.use("/api/upload", uploadRoutes);
-app.use("/api/live-classes", liveClassRoutes);
+app.use("/api", indexRoutes);
 
 // 404 Fallback Handler for Unmatched Routes
 app.use((req, res) => {

@@ -2,7 +2,7 @@ import mongoose, { Schema, Document } from "mongoose";
 
 export interface IProgress extends Document {
   student: mongoose.Types.ObjectId;
-  course: mongoose.Types.ObjectId;
+  course: any;
   completedLessons: string[];
   lastAccessed?: Date;
 }
@@ -10,7 +10,7 @@ export interface IProgress extends Document {
 const progressSchema = new Schema<IProgress>(
   {
     student: { type: Schema.Types.ObjectId, ref: "User", required: true },
-    course: { type: Schema.Types.ObjectId, ref: "Course", required: true },
+    course: { type: Schema.Types.Mixed, ref: "Course", required: true },
     completedLessons: [{ type: String }],
     lastAccessed: { type: Date, default: Date.now },
   },

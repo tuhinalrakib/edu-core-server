@@ -140,6 +140,7 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
       role: user.role,
       avatar: user.avatar,
       earnings: user.earnings,
+      enrolledCourses: user.enrolledCourses || [],
     },
   });
 });
@@ -287,6 +288,7 @@ export const verifyLoginOtp = asyncHandler(async (req: Request, res: Response) =
       role: user.role,
       avatar: user.avatar,
       earnings: user.earnings,
+      enrolledCourses: user.enrolledCourses || [],
     },
   });
 });

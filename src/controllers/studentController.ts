@@ -7,6 +7,7 @@ import { User } from "../models/User";
 import { invalidateCache } from "../utils/redis";
 
 // @desc    Enroll in a course
+// @desc    Enroll in a course
 // @route   POST /api/student/enroll
 // @access  Private/Student
 export const enrollInCourse = asyncHandler(async (req: any, res: Response) => {
@@ -22,6 +23,15 @@ export const enrollInCourse = asyncHandler(async (req: any, res: Response) => {
   }
   if (!course) {
     course = await Course.findOne({ slug: courseId });
+  }
+  if (!course) {
+    course = await Course.findOne({ title: courseId });
+  }
+  if (!course) {
+    const timestampMatch = String(courseId).match(/\d{10,}/);
+    if (timestampMatch) {
+      course = await Course.findOne({ slug: { $regex: timestampMatch[0], $options: "i" } });
+    }
   }
 
   if (!course) {
@@ -41,7 +51,10 @@ export const enrollInCourse = asyncHandler(async (req: any, res: Response) => {
   }
 
   const isAlreadyEnrolled = user.enrolledCourses.some(
-    (c: any) => c.toString() === course._id.toString()
+    (c: any) =>
+      c.toString() === course._id.toString() ||
+      (c._id && c._id.toString() === course._id.toString()) ||
+      c.toString() === course.slug
   );
 
   if (!isAlreadyEnrolled) {
@@ -63,14 +76,24 @@ export const enrollInCourse = asyncHandler(async (req: any, res: Response) => {
 
   // Invalidate Redis caches so all pages get live updated enrolled student count immediately
   try {
-    await invalidateCache("courses", `courses:id:${course._id}`, `courses:id:${course.slug}`);
+    await invalidateCache("courses", `courses:id:${course._id}`, `courses:id:${course.slug}`, "admin:stats");
   } catch (cacheErr) {}
+
+  const enrolledCourseIds = Array.from(
+    new Set([
+      ...user.enrolledCourses.map((c: any) => (c._id ? c._id.toString() : c.toString())),
+      course._id.toString(),
+      ...(course.slug ? [course.slug] : []),
+    ])
+  );
 
   res.json({
     success: true,
     message: "Enrolled successfully",
     isEnrolled: true,
     progress,
+    enrolledCourses: user.enrolledCourses,
+    enrolledCourseIds,
   });
 });
 
@@ -79,13 +102,65 @@ export const enrollInCourse = asyncHandler(async (req: any, res: Response) => {
 // @route   GET /api/student/courses
 // @access  Private/Student
 export const getEnrolledCoursesProgress = asyncHandler(async (req: any, res: Response) => {
-  const user = await User.findById(req.user.id).populate("enrolledCourses");
+  const user = await User.findById(req.user.id);
   const progressList = await Progress.find({ student: req.user.id }).populate("course");
-  
+
+  if (!user) {
+    res.status(404);
+    throw new Error("User not found");
+  }
+
+  if (!Array.isArray(user.enrolledCourses)) {
+    user.enrolledCourses = [];
+  }
+
+  // Bidirectional sync: If user has progress in any course, ensure it is in user.enrolledCourses
+  let userUpdated = false;
+  for (const prog of progressList) {
+    const pCourseId = prog.course?._id || prog.course;
+    if (pCourseId) {
+      const alreadyHas = user.enrolledCourses.some(
+        (c: any) => c.toString() === pCourseId.toString()
+      );
+      if (!alreadyHas) {
+        user.enrolledCourses.push(pCourseId);
+        userUpdated = true;
+      }
+    }
+  }
+
+  if (userUpdated) {
+    await user.save();
+  }
+
+  await user.populate("enrolledCourses");
+
+  const enrolledCourseIdsSet = new Set<string>();
+  (user.enrolledCourses || []).forEach((c: any) => {
+    if (typeof c === "object" && c !== null) {
+      if (c._id) enrolledCourseIdsSet.add(c._id.toString());
+      if (c.slug) enrolledCourseIdsSet.add(c.slug);
+    } else if (c) {
+      enrolledCourseIdsSet.add(c.toString());
+    }
+  });
+
+  progressList.forEach((p: any) => {
+    if (p.course) {
+      if (typeof p.course === "object") {
+        if (p.course._id) enrolledCourseIdsSet.add(p.course._id.toString());
+        if (p.course.slug) enrolledCourseIdsSet.add(p.course.slug);
+      } else {
+        enrolledCourseIdsSet.add(p.course.toString());
+      }
+    }
+  });
+
   res.json({
     success: true,
     progressList,
     enrolledCourses: user?.enrolledCourses || [],
+    enrolledCourseIds: Array.from(enrolledCourseIdsSet),
   });
 });
 
@@ -95,33 +170,53 @@ export const getEnrolledCoursesProgress = asyncHandler(async (req: any, res: Res
 export const getCourseProgress = asyncHandler(async (req: any, res: Response) => {
   const { courseId } = req.params;
 
-  let resolvedCourseId: any = courseId;
   let course: any = null;
-
   if (mongoose.Types.ObjectId.isValid(courseId)) {
     course = await Course.findById(courseId);
   }
   if (!course) {
     course = await Course.findOne({ slug: courseId });
   }
-  if (course) {
-    resolvedCourseId = course._id;
+  if (!course) {
+    course = await Course.findOne({ title: courseId });
+  }
+  if (!course) {
+    const timestampMatch = String(courseId).match(/\d{10,}/);
+    if (timestampMatch) {
+      course = await Course.findOne({ slug: { $regex: timestampMatch[0], $options: "i" } });
+    }
   }
 
+  const targetCourseId = course ? course._id : courseId;
   const user = await User.findById(req.user.id);
   const isEnrolledInUser = user?.enrolledCourses?.some(
-    (c: any) => (course && c.toString() === course._id.toString()) || c.toString() === String(courseId)
+    (c: any) =>
+      (course && c.toString() === course._id.toString()) ||
+      c.toString() === String(courseId) ||
+      (course?.slug && c.toString() === course.slug)
   ) || false;
 
   let progress = null;
   if (course) {
     progress = await Progress.findOne({ student: req.user.id, course: course._id });
   }
-  if (!progress && mongoose.Types.ObjectId.isValid(resolvedCourseId)) {
-    progress = await Progress.findOne({ student: req.user.id, course: resolvedCourseId });
+  if (!progress && mongoose.Types.ObjectId.isValid(targetCourseId)) {
+    progress = await Progress.findOne({ student: req.user.id, course: targetCourseId });
   }
 
   const isEnrolled = isEnrolledInUser || Boolean(progress);
+
+  // Sync back to user if progress existed
+  if (isEnrolled && user && course) {
+    if (!Array.isArray(user.enrolledCourses)) user.enrolledCourses = [];
+    const alreadyInUser = user.enrolledCourses.some(
+      (c: any) => c.toString() === course._id.toString()
+    );
+    if (!alreadyInUser) {
+      user.enrolledCourses.push(course._id);
+      await user.save();
+    }
+  }
 
   res.json({
     success: true,
