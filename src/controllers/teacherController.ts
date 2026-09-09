@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { asyncHandler } from "../utils/asyncHandler";
 import { Course } from "../models/Course";
 import { User } from "../models/User";
+import { Enrollment } from "../models/Enrollment";
 
 // @desc    Get instructor overview stats
 // @route   GET /api/teacher/stats
@@ -9,11 +10,16 @@ import { User } from "../models/User";
 export const getTeacherStats = asyncHandler(async (req: any, res: Response) => {
   const courses = await Course.find({ teacher: req.user.id });
   const user = await User.findById(req.user.id);
+  const totalEnrollments = await Enrollment.countDocuments({ teacher: req.user.id });
+  const pendingEnrollments = await Enrollment.countDocuments({ teacher: req.user.id, status: "pending" });
+
   res.json({
     success: true,
     stats: {
       totalCourses: courses.length,
       totalStudents: courses.reduce((sum, c) => sum + c.totalStudents, 0),
+      totalEnrollments,
+      pendingEnrollments,
       revenue: user?.earnings || 4520,
       averageRating: 4.8,
     },
@@ -50,3 +56,32 @@ export const createTeacherCourse = asyncHandler(async (req: any, res: Response) 
 
   res.status(201).json({ success: true, message: "Course created successfully!", course });
 });
+
+// @desc    Get enrolled students list for teacher's courses
+// @route   GET /api/teacher/enrollments
+// @access  Private/Teacher
+export const getTeacherEnrollments = asyncHandler(async (req: any, res: Response) => {
+  const teacherId = req.user.id;
+  const enrollments = await Enrollment.find({ teacher: teacherId })
+    .populate("student", "name email avatar phone")
+    .populate("course", "title slug thumbnail")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const total = enrollments.length;
+  const pending = enrollments.filter((e) => e.status === "pending").length;
+  const approved = enrollments.filter((e) => e.status === "approved").length;
+  const rejected = enrollments.filter((e) => e.status === "rejected").length;
+
+  res.json({
+    success: true,
+    enrollments,
+    counts: {
+      total,
+      pending,
+      approved,
+      rejected,
+    },
+  });
+});
+

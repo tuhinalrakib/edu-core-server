@@ -8,6 +8,9 @@ import {
   getAdminCourses,
   updateCourseStatus,
   toggleFeaturedCourse,
+  getAdminEnrollments,
+  approveEnrollment,
+  rejectEnrollment,
 } from "../controllers/adminController";
 import { authenticateJWT, authorizeRoles } from "../middleware/auth";
 
@@ -26,4 +29,10 @@ router.get("/courses", getAdminCourses);
 router.patch("/courses/:id/status", updateCourseStatus);
 router.patch("/courses/:id/feature", toggleFeaturedCourse);
 
+// Enrollment Approval & Denial Endpoints
+router.get("/enrollments", getAdminEnrollments);
+router.patch("/enrollments/:id/approve", approveEnrollment);
+router.patch("/enrollments/:id/reject", rejectEnrollment);
+
 export default router;
+

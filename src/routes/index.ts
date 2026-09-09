@@ -12,6 +12,7 @@ import paymentRoutes from "./paymentRoutes";
 import dashboardRoutes from "./dashboardRoutes";
 import uploadRoutes from "./uploadRoutes";
 import liveClassRoutes from "./liveClassRoutes";
+import notificationRoutes from "./notificationRoutes";
 
 const router = Router();
 
@@ -28,6 +29,7 @@ router.use("/payments", paymentRoutes);
 router.use("/dashboard", dashboardRoutes);
 router.use("/upload", uploadRoutes);
 router.use("/live-classes", liveClassRoutes);
+router.use("/notifications", notificationRoutes);
 
 
 export default router;

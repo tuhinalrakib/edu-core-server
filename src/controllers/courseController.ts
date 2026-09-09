@@ -5,6 +5,7 @@ import { asyncHandler } from "../utils/asyncHandler";
 import { Course } from "../models/Course";
 import { User } from "../models/User";
 import { Progress } from "../models/Progress";
+import { Enrollment } from "../models/Enrollment";
 import { getCache, setCache, invalidateCache } from "../utils/redis";
 
 /**
@@ -224,39 +225,27 @@ export const getAllCourses = asyncHandler(async (req: Request, res: Response) =>
   const attachStudentEnrollment = async (baseCourses: any[]) => {
     if (!requester?.id || requester.role !== "student") return baseCourses;
     try {
-      const studentUser = await User.findById(requester.id).select("enrolledCourses").lean();
-      const studentProgress = await Progress.find({ student: requester.id }).select("course").lean();
-      const enrolledSet = new Set<string>();
+      const enrollments = await Enrollment.find({ student: requester.id }).lean();
+      const statusMap = new Map<string, string>();
 
-      if (studentUser && Array.isArray(studentUser.enrolledCourses)) {
-        studentUser.enrolledCourses.forEach((c: any) => {
-          if (typeof c === "object" && c !== null) {
-            if (c._id) enrolledSet.add(c._id.toString());
-            if (c.slug) enrolledSet.add(c.slug);
-          } else if (c) {
-            enrolledSet.add(c.toString());
-          }
-        });
-      }
-
-      if (studentProgress) {
-        studentProgress.forEach((p: any) => {
-          if (p.course) {
-            if (typeof p.course === "object" && p.course !== null) {
-              if (p.course._id) enrolledSet.add(p.course._id.toString());
-              if (p.course.slug) enrolledSet.add(p.course.slug);
-            } else {
-              enrolledSet.add(p.course.toString());
-            }
-          }
-        });
-      }
+      enrollments.forEach((e: any) => {
+        const cId = e.course?.toString();
+        if (cId) {
+          statusMap.set(cId, e.status);
+        }
+      });
 
       return baseCourses.map((c: any) => {
         const cId = c._id?.toString();
-        const cSlug = c.slug;
-        const isEnrolled = (cId && enrolledSet.has(cId)) || (cSlug && enrolledSet.has(cSlug));
-        return { ...c, isEnrolled: Boolean(isEnrolled) };
+        const status = cId ? statusMap.get(cId) : undefined;
+        const isApproved = status === "approved";
+        const isEnrolled = Boolean(status);
+        return {
+          ...c,
+          isEnrolled,
+          isApproved,
+          enrollmentStatus: status || "not_enrolled",
+        };
       });
     } catch (err) {
       return baseCourses;
@@ -372,25 +361,54 @@ export const getCourseByIdentifier = asyncHandler(async (req: Request, res: Resp
     (requester.role === "admin" || (requester.id && teacherIdStr && requester.id === teacherIdStr))
   );
 
-  const safeCourse = sanitizeCourseForDrip(course, isTeacherOrAdmin);
+  let safeCourse = sanitizeCourseForDrip(course, isTeacherOrAdmin);
+  safeCourse = typeof safeCourse.toObject === "function" ? safeCourse.toObject() : JSON.parse(JSON.stringify(safeCourse));
 
-  if (requester?.id) {
+  let isApproved = isTeacherOrAdmin;
+  let isEnrolled = isTeacherOrAdmin;
+  let enrollmentStatus = isTeacherOrAdmin ? "approved" : "not_enrolled";
+
+  if (!isTeacherOrAdmin && requester?.id) {
     try {
-      const studentUser = await User.findById(requester.id).select("enrolledCourses").lean();
-      const studentProgress = await Progress.findOne({
+      const enrollment = await Enrollment.findOne({
         student: requester.id,
-        course: { $in: [course._id, course.slug, identifier] },
+        course: course._id,
       }).lean();
 
-      const enrolledInUser = studentUser?.enrolledCourses?.some(
-        (c: any) =>
-          (c && c.toString() === course._id.toString()) ||
-          (c && course.slug && c.toString() === course.slug) ||
-          (c?._id && c._id.toString() === course._id.toString())
-      );
-
-      safeCourse.isEnrolled = Boolean(enrolledInUser || studentProgress);
+      if (enrollment) {
+        isEnrolled = true;
+        enrollmentStatus = enrollment.status;
+        isApproved = enrollment.status === "approved";
+      }
     } catch (e) {}
+  }
+
+  safeCourse.isEnrolled = isEnrolled;
+  safeCourse.isApproved = isApproved;
+  safeCourse.enrollmentStatus = enrollmentStatus;
+
+  // STRICT BACKEND SECURITY: If student enrollment is NOT approved, strip video URLs from all non-preview lessons!
+  if (!isTeacherOrAdmin && !isApproved) {
+    if (Array.isArray(safeCourse.sections)) {
+      safeCourse.sections = safeCourse.sections.map((sec: any) => {
+        if (Array.isArray(sec.lessons)) {
+          sec.lessons = sec.lessons.map((les: any) => {
+            if (!les.isFreePreview) {
+              return {
+                ...les,
+                contentUrl: "", // 100% STRIPPED FROM BACKEND
+                isLocked: true,
+                resources: [],
+                quiz: undefined,
+                assignment: undefined,
+              };
+            }
+            return les;
+          });
+        }
+        return sec;
+      });
+    }
   }
 
   res.json({ success: true, course: safeCourse });

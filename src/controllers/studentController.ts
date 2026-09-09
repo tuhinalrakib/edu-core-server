@@ -4,10 +4,11 @@ import { asyncHandler } from "../utils/asyncHandler";
 import { Progress } from "../models/Progress";
 import { Course } from "../models/Course";
 import { User } from "../models/User";
+import { Enrollment } from "../models/Enrollment";
+import { sendDbNotification } from "./notificationController";
 import { invalidateCache } from "../utils/redis";
 
-// @desc    Enroll in a course
-// @desc    Enroll in a course
+// @desc    Enroll in a course (Creates pending enrollment awaiting admin approval)
 // @route   POST /api/student/enroll
 // @access  Private/Student
 export const enrollInCourse = asyncHandler(async (req: any, res: Response) => {
@@ -45,126 +46,166 @@ export const enrollInCourse = asyncHandler(async (req: any, res: Response) => {
     throw new Error("User not found");
   }
 
-  // Ensure enrolledCourses array exists
-  if (!Array.isArray(user.enrolledCourses)) {
-    user.enrolledCourses = [];
-  }
+  // Resolve teacher ObjectId
+  const teacherId = course.teacher?._id || course.teacher;
 
-  const isAlreadyEnrolled = user.enrolledCourses.some(
-    (c: any) =>
-      c.toString() === course._id.toString() ||
-      (c._id && c._id.toString() === course._id.toString()) ||
-      c.toString() === course.slug
-  );
+  // Check if enrollment already exists in database
+  let enrollment = await Enrollment.findOne({
+    student: req.user.id,
+    course: course._id,
+  });
 
-  if (!isAlreadyEnrolled) {
-    user.enrolledCourses.push(course._id);
-    await user.save();
-    // Increment course totalStudents count
-    await Course.findByIdAndUpdate(course._id, { $inc: { totalStudents: 1 } });
-  }
+  let isNewRequest = false;
 
-  // Create initial Progress document if doesn't exist
-  let progress = await Progress.findOne({ student: req.user.id, course: course._id });
-  if (!progress) {
-    progress = await Progress.create({
+  if (enrollment) {
+    if (enrollment.status === "approved") {
+      return res.json({
+        success: true,
+        message: "You are already enrolled and approved in this course.",
+        isEnrolled: true,
+        isApproved: true,
+        status: "approved",
+        enrollment,
+      });
+    }
+
+    if (enrollment.status === "pending") {
+      return res.json({
+        success: true,
+        message: "Your enrollment request has already been submitted and is awaiting admin approval.",
+        isEnrolled: true,
+        isApproved: false,
+        status: "pending",
+        enrollment,
+      });
+    }
+
+    if (enrollment.status === "rejected") {
+      // Re-apply: update status to pending
+      enrollment.status = "pending";
+      enrollment.enrolledAt = new Date();
+      await enrollment.save();
+      isNewRequest = true;
+    }
+  } else {
+    // Create new pending enrollment
+    enrollment = await Enrollment.create({
       student: req.user.id,
       course: course._id,
-      completedLessons: [],
+      teacher: teacherId || req.user.id,
+      status: "pending",
+      enrolledAt: new Date(),
     });
+    isNewRequest = true;
   }
 
-  // Invalidate Redis caches so all pages get live updated enrolled student count immediately
-  try {
-    await invalidateCache("courses", `courses:id:${course._id}`, `courses:id:${course.slug}`, "admin:stats");
-  } catch (cacheErr) {}
+  // If a new pending request was created/re-applied, dispatch DB notifications
+  if (isNewRequest) {
+    // 1. Notify Admins in Database
+    await sendDbNotification({
+      recipientRole: "admin",
+      title: "New Student Enrollment ⏳",
+      message: `${user.name} has enrolled in "${course.title}". Waiting for admin approval.`,
+      type: "enrollment_pending",
+      link: "/admin/dashboard?tab=enrollments",
+      data: {
+        enrollmentId: enrollment._id,
+        courseId: course._id,
+        courseTitle: course.title,
+        studentId: user._id,
+        studentName: user.name,
+        studentEmail: user.email,
+      },
+    });
 
-  const enrolledCourseIds = Array.from(
-    new Set([
-      ...user.enrolledCourses.map((c: any) => (c._id ? c._id.toString() : c.toString())),
-      course._id.toString(),
-      ...(course.slug ? [course.slug] : []),
-    ])
-  );
+    // 2. Notify Course Teacher in Database
+    if (teacherId && mongoose.Types.ObjectId.isValid(String(teacherId))) {
+      await sendDbNotification({
+        recipient: teacherId,
+        recipientRole: "teacher",
+        title: "New Student Enrolled (Pending Approval) 📚",
+        message: `${user.name} enrolled in your course "${course.title}". Currently awaiting admin approval.`,
+        type: "enrollment_pending",
+        link: "/teacher/dashboard?tab=students",
+        data: {
+          enrollmentId: enrollment._id,
+          courseId: course._id,
+          courseTitle: course.title,
+          studentId: user._id,
+          studentName: user.name,
+        },
+      });
+    }
+
+    // Invalidate Redis caches so stats and notifications refresh
+    try {
+      await invalidateCache("admin:stats", "admin:courses:all", `courses:id:${course._id}`, `courses:id:${course.slug}`);
+    } catch (cacheErr) {}
+  }
 
   res.json({
     success: true,
-    message: "Enrolled successfully",
+    message: "Enrollment request submitted! Course video access will be unlocked once approved by an administrator.",
     isEnrolled: true,
-    progress,
-    enrolledCourses: user.enrolledCourses,
-    enrolledCourseIds,
+    isApproved: false,
+    status: "pending",
+    enrollment,
   });
 });
 
-
-// @desc    Get student enrolled courses progress
+// @desc    Get student enrolled courses progress (includes enrollment approval status)
 // @route   GET /api/student/courses
 // @access  Private/Student
 export const getEnrolledCoursesProgress = asyncHandler(async (req: any, res: Response) => {
   const user = await User.findById(req.user.id);
-  const progressList = await Progress.find({ student: req.user.id }).populate("course");
-
   if (!user) {
     res.status(404);
     throw new Error("User not found");
   }
 
-  if (!Array.isArray(user.enrolledCourses)) {
-    user.enrolledCourses = [];
-  }
+  // Fetch all enrollments for this student
+  const enrollments = await Enrollment.find({ student: req.user.id })
+    .populate("course")
+    .populate("teacher", "name email avatar")
+    .sort({ createdAt: -1 });
 
-  // Bidirectional sync: If user has progress in any course, ensure it is in user.enrolledCourses
-  let userUpdated = false;
-  for (const prog of progressList) {
-    const pCourseId = prog.course?._id || prog.course;
-    if (pCourseId) {
-      const alreadyHas = user.enrolledCourses.some(
-        (c: any) => c.toString() === pCourseId.toString()
-      );
-      if (!alreadyHas) {
-        user.enrolledCourses.push(pCourseId);
-        userUpdated = true;
-      }
+  const progressList = await Progress.find({ student: req.user.id }).populate("course");
+
+  const approvedCourseIdsSet = new Set<string>();
+  const pendingCourseIdsSet = new Set<string>();
+
+  enrollments.forEach((en: any) => {
+    const cId = en.course?._id?.toString() || en.course?.toString();
+    const cSlug = en.course?.slug;
+    if (en.status === "approved") {
+      if (cId) approvedCourseIdsSet.add(cId);
+      if (cSlug) approvedCourseIdsSet.add(cSlug);
+    } else if (en.status === "pending") {
+      if (cId) pendingCourseIdsSet.add(cId);
+      if (cSlug) pendingCourseIdsSet.add(cSlug);
     }
-  }
+  });
 
-  if (userUpdated) {
+  // Ensure user's enrolledCourses in DB only contains approved courses
+  const approvedObjectIds = enrollments
+    .filter((e) => e.status === "approved" && e.course)
+    .map((e: any) => e.course._id || e.course);
+
+  if (approvedObjectIds.length > 0) {
+    user.enrolledCourses = approvedObjectIds;
     await user.save();
   }
 
-  await user.populate("enrolledCourses");
-
-  const enrolledCourseIdsSet = new Set<string>();
-  (user.enrolledCourses || []).forEach((c: any) => {
-    if (typeof c === "object" && c !== null) {
-      if (c._id) enrolledCourseIdsSet.add(c._id.toString());
-      if (c.slug) enrolledCourseIdsSet.add(c.slug);
-    } else if (c) {
-      enrolledCourseIdsSet.add(c.toString());
-    }
-  });
-
-  progressList.forEach((p: any) => {
-    if (p.course) {
-      if (typeof p.course === "object") {
-        if (p.course._id) enrolledCourseIdsSet.add(p.course._id.toString());
-        if (p.course.slug) enrolledCourseIdsSet.add(p.course.slug);
-      } else {
-        enrolledCourseIdsSet.add(p.course.toString());
-      }
-    }
-  });
-
   res.json({
     success: true,
+    enrollments,
     progressList,
-    enrolledCourses: user?.enrolledCourses || [],
-    enrolledCourseIds: Array.from(enrolledCourseIdsSet),
+    enrolledCourseIds: Array.from(approvedCourseIdsSet),
+    pendingCourseIds: Array.from(pendingCourseIdsSet),
   });
 });
 
-// @desc    Get student progress for a specific course
+// @desc    Get student progress for a specific course (enforces admin approval check)
 // @route   GET /api/student/progress/:courseId
 // @access  Private/Student
 export const getCourseProgress = asyncHandler(async (req: any, res: Response) => {
@@ -188,44 +229,35 @@ export const getCourseProgress = asyncHandler(async (req: any, res: Response) =>
   }
 
   const targetCourseId = course ? course._id : courseId;
-  const user = await User.findById(req.user.id);
-  const isEnrolledInUser = user?.enrolledCourses?.some(
-    (c: any) =>
-      (course && c.toString() === course._id.toString()) ||
-      c.toString() === String(courseId) ||
-      (course?.slug && c.toString() === course.slug)
-  ) || false;
+
+  // Check enrollment status in DB
+  let enrollment = null;
+  if (mongoose.Types.ObjectId.isValid(targetCourseId)) {
+    enrollment = await Enrollment.findOne({
+      student: req.user.id,
+      course: targetCourseId,
+    });
+  }
+
+  const isEnrolled = Boolean(enrollment);
+  const isApproved = Boolean(enrollment && enrollment.status === "approved");
+  const enrollmentStatus = enrollment ? enrollment.status : "not_enrolled";
 
   let progress = null;
-  if (course) {
+  if (isApproved && course) {
     progress = await Progress.findOne({ student: req.user.id, course: course._id });
-  }
-  if (!progress && mongoose.Types.ObjectId.isValid(targetCourseId)) {
-    progress = await Progress.findOne({ student: req.user.id, course: targetCourseId });
-  }
-
-  const isEnrolled = isEnrolledInUser || Boolean(progress);
-
-  // Sync back to user if progress existed
-  if (isEnrolled && user && course) {
-    if (!Array.isArray(user.enrolledCourses)) user.enrolledCourses = [];
-    const alreadyInUser = user.enrolledCourses.some(
-      (c: any) => c.toString() === course._id.toString()
-    );
-    if (!alreadyInUser) {
-      user.enrolledCourses.push(course._id);
-      await user.save();
-    }
   }
 
   res.json({
     success: true,
     isEnrolled,
+    isApproved,
+    enrollmentStatus,
     progress: progress || { completedLessons: [] },
   });
 });
 
-// @desc    Update student lesson completion progress
+// @desc    Update student lesson completion progress (Strictly blocked if not approved)
 // @route   POST /api/student/progress
 // @access  Private/Student
 export const updateLessonProgress = asyncHandler(async (req: any, res: Response) => {
@@ -236,7 +268,6 @@ export const updateLessonProgress = asyncHandler(async (req: any, res: Response)
     throw new Error("courseId and lessonId are required");
   }
 
-  // Resolve course
   let course: any = null;
   if (mongoose.Types.ObjectId.isValid(courseId)) {
     course = await Course.findById(courseId);
@@ -246,6 +277,19 @@ export const updateLessonProgress = asyncHandler(async (req: any, res: Response)
   }
 
   const targetCourseId = course ? course._id : courseId;
+
+  // STRICT SECURITY CHECK: verify student's enrollment is approved by admin!
+  const enrollment = await Enrollment.findOne({
+    student: req.user.id,
+    course: targetCourseId,
+  });
+
+  if (!enrollment || enrollment.status !== "approved") {
+    return res.status(403).json({
+      success: false,
+      message: "Access Denied: Your enrollment is pending admin approval. You cannot mark lessons as complete.",
+    });
+  }
 
   // Security check: verify if the lesson is locked by future publish date & time
   if (course && Array.isArray(course.sections)) {
@@ -270,10 +314,7 @@ export const updateLessonProgress = asyncHandler(async (req: any, res: Response)
     }
   }
 
-  let progress = null;
-  if (mongoose.Types.ObjectId.isValid(targetCourseId)) {
-    progress = await Progress.findOne({ student: req.user.id, course: targetCourseId });
-  }
+  let progress = await Progress.findOne({ student: req.user.id, course: targetCourseId });
 
   if (!progress) {
     progress = await Progress.create({
@@ -286,18 +327,5 @@ export const updateLessonProgress = asyncHandler(async (req: any, res: Response)
     await progress.save();
   }
 
-  // Also make sure course is in user.enrolledCourses
-  if (course) {
-    const user = await User.findById(req.user.id);
-    if (user && Array.isArray(user.enrolledCourses)) {
-      if (!user.enrolledCourses.some((c: any) => c.toString() === course._id.toString())) {
-        user.enrolledCourses.push(course._id);
-        await user.save();
-      }
-    }
-  }
-
   res.json({ success: true, progress });
 });
-
-
